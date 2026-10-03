@@ -111,8 +111,25 @@ drop view if exists public.daily_summary;
 drop view if exists public.entries_readable;
 drop view if exists public.episodes_readable;
 
+-- One line describing an entry, e.g. 'Headache started', 'Mood: Good', 'Water: 3 glasses'.
+-- Matches entryText() in src/lib/model.ts.
+create or replace function public.logbook_entry_text(
+  kind text, tracker text, tracker_type text, unit text, num numeric, txt text)
+returns text language sql immutable as $$
+  select case kind
+    when 'start'  then tracker || ' started'
+    when 'end'    then tracker || ' ended'
+    when 'moment' then tracker
+    when 'value'  then case when tracker_type = 'number'
+                         then tracker || ': ' || coalesce(num::text, '') || coalesce(' ' || nullif(unit, ''), '')
+                         else tracker || ': ' || coalesce(nullif(txt, ''), num::text, '') end
+    else tracker || ': ' || coalesce(nullif(txt, ''), num::text, '')
+  end
+$$;
+
 -- An episode runs from a start to the next start or end of the same tracker:
 -- status 'ended' (closed by an end), 'restarted' (closed by another start), or 'ongoing' (still running).
+-- "timeline" lists everything logged while it ran, e.g. '10:00 started · 10:30 Moderate · 11:30 Coffee · 12:00 ended'.
 create view public.episodes_readable
 with (security_invoker = true) as
 with events as (
@@ -139,21 +156,24 @@ spans as (
 )
 select
   s.episode_id,
-  s.tracker_id,
   t.name as tracker,
-  t.grp  as "group",
-  (s.start_utc at time zone public.logbook_timezone())::date as start_date,
-  to_char(s.start_utc at time zone public.logbook_timezone(), 'HH24:MI') as start_time,
-  s.start_utc,
-  case when s.status <> 'ongoing' then (s.end_or_now at time zone public.logbook_timezone())::date end as end_date,
-  case when s.status <> 'ongoing' then to_char(s.end_or_now at time zone public.logbook_timezone(), 'HH24:MI') end as end_time,
-  case when s.status <> 'ongoing' then s.end_or_now end as end_utc,
-  round(extract(epoch from s.end_or_now - s.start_utc) / 60)::integer as duration_min,  -- so far, if ongoing
+  date_trunc('second', s.start_utc at time zone public.logbook_timezone()) as start,
+  case when s.status <> 'ongoing' then date_trunc('second', s.end_or_now at time zone public.logbook_timezone()) end as "end",
+  round(extract(epoch from s.end_or_now - s.start_utc) / 60, 1) as duration_min,  -- so far, if ongoing
   s.status,
   lv.max_level,
   lv.max_level_label,
-  lv.levels_logged,
+  tl.timeline,
   nullif(concat_ws(' | ', s.start_note, s.end_note, lv.notes), '') as notes,
+  s.tracker_id,
+  t.grp  as "group",
+  (s.start_utc at time zone public.logbook_timezone())::date as start_date,
+  to_char(s.start_utc at time zone public.logbook_timezone(), 'HH24:MI') as start_time,
+  case when s.status <> 'ongoing' then (s.end_or_now at time zone public.logbook_timezone())::date end as end_date,
+  case when s.status <> 'ongoing' then to_char(s.end_or_now at time zone public.logbook_timezone(), 'HH24:MI') end as end_time,
+  s.start_utc,
+  case when s.status <> 'ongoing' then s.end_or_now end as end_utc,
+  lv.levels_logged,
   s.end_entry_id
 from spans s
 join public.trackers t on t.id = s.tracker_id
@@ -166,16 +186,41 @@ cross join lateral (
   from public.entries l
   where l.tracker_id = s.tracker_id and l.kind = 'level' and not l.deleted
     and l.ts between s.start_utc and s.end_or_now
-) lv;
+) lv
+cross join lateral (
+  -- Everything logged while it ran (at most 100 items). Times on a later day than the start get the date.
+  select string_agg(item, ' · ' order by n) filter (where n <= 100)
+         || case when count(*) > 100 then ' · … and ' || (count(*) - 100) || ' more' else '' end as timeline
+  from (
+    select row_number() over (order by x.ts, xt.sort, x.id) as n,
+           case when (x.ts at time zone public.logbook_timezone())::date
+                     <> (s.start_utc at time zone public.logbook_timezone())::date
+                then to_char(x.ts at time zone public.logbook_timezone(), 'MM-DD ') else '' end
+           || to_char(x.ts at time zone public.logbook_timezone(), 'HH24:MI') || ' '
+           || case
+                when x.id = s.episode_id then 'started'
+                when x.id = s.end_entry_id then 'ended'
+                when x.tracker_id = s.tracker_id and x.kind = 'start' then 'restarted'
+                when x.tracker_id = s.tracker_id and x.kind = 'level' then coalesce(nullif(x.txt, ''), x.num::text, '')
+                else public.logbook_entry_text(x.kind, xt.name, xt.type, xt.config->>'unit', x.num, x.txt)
+              end as item
+    from public.entries x
+    join public.trackers xt on xt.id = x.tracker_id
+    where not x.deleted and x.ts between s.start_utc and s.end_or_now
+  ) items
+) tl;
 
 create view public.entries_readable
 with (security_invoker = true) as
 with episodes as (
-  select episode_id, tracker_id, start_utc, coalesce(end_utc, now()) as end_or_now, end_entry_id
-  from public.episodes_readable
+  select e.episode_id, e.tracker_id, e.tracker, t.sort as tracker_sort,
+         e.start_utc, coalesce(e.end_utc, now()) as end_or_now, e.end_entry_id
+  from public.episodes_readable e
+  join public.trackers t on t.id = e.tracker_id
 )
 select
   e.id as entry_id,
+  date_trunc('second', e.ts at time zone public.logbook_timezone()) as datetime,
   (e.ts at time zone public.logbook_timezone())::date as date,
   to_char(e.ts at time zone public.logbook_timezone(), 'HH24:MI') as time,
   to_char(e.ts at time zone public.logbook_timezone(), 'Dy') as weekday,
@@ -190,7 +235,9 @@ select
   case when e.kind = 'value' and t.type = 'text' then e.txt end as text,             -- free text
   e.note,
   e.checkin_id,
-  coalesce(started.episode_id, ended.episode_id, during.episode_id) as episode_id
+  coalesce(started.episode_id, ended.episode_id, during_own.episode_id) as episode_id,
+  running.during,               -- other trackers' episodes running at the time
+  running.during_episode_ids
 from public.entries e
 join public.trackers t on t.id = e.tracker_id
 left join episodes started on e.kind = 'start' and started.episode_id = e.id
@@ -200,7 +247,13 @@ left join lateral (
   where e.kind = 'level' and x.tracker_id = e.tracker_id and e.ts between x.start_utc and x.end_or_now
   order by x.start_utc
   limit 1
-) during on true
+) during_own on true
+left join lateral (
+  select string_agg(x.tracker, '; ' order by x.tracker_sort, x.start_utc) as during,
+         string_agg(x.episode_id::text, '; ' order by x.tracker_sort, x.start_utc) as during_episode_ids
+  from episodes x
+  where x.tracker_id <> e.tracker_id and e.ts between x.start_utc and x.end_or_now
+) running on true
 where not e.deleted;
 
 -- One row per day and tracker that has anything that day. Episode minutes are clipped at local midnight,

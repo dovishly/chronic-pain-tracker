@@ -1,52 +1,51 @@
-// Exports: CSV tables for analysis (see analysis.ts), and a JSON backup of everything on this device.
+// Exports: the analysis tables as CSV files in one .zip (see analysis.ts), and a JSON backup of everything.
 import { dayKey, nowIso } from './util';
 import { dataStore } from './data';
 import { buildAnalysisTables, toCsv } from './analysis';
+import { zip } from './zip';
 
 interface ExportFile {
   name: string;
-  text: string;
+  data: string | Uint8Array<ArrayBuffer>;
   type: string;
 }
 
 /**
  * Opens the share sheet where the browser can share files (iPhone: Save to Files, AirDrop, Mail…),
- * otherwise downloads each file.
+ * otherwise downloads the file.
  */
-async function shareOrDownload(files: ExportFile[]): Promise<void> {
-  const shareable = files.map(f => new File([f.text], f.name, { type: f.type }));
+async function shareOrDownload(file: ExportFile): Promise<void> {
+  const shareable = new File([file.data], file.name, { type: file.type });
   try {
-    if (navigator.canShare?.({ files: shareable })) {
-      await navigator.share({ files: shareable, title: files.length === 1 ? files[0].name : 'Logbook export' });
+    if (navigator.canShare?.({ files: [shareable] })) {
+      await navigator.share({ files: [shareable], title: file.name });
       return;
     }
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') return; // the person closed the share sheet
   }
-  for (const file of shareable) {
-    const url = URL.createObjectURL(file);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = file.name;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    await new Promise(resolve => setTimeout(resolve, 250)); // browsers drop downloads started too close together
-  }
+  const url = URL.createObjectURL(shareable);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 const today = () => dayKey(Date.now());
 
-/** Five CSV files: daily, checkins, episodes, entries, trackers. */
+/**
+ * One .zip holding a folder of five CSV files: daily, checkins, episodes, entries, trackers.
+ * Unzipped, they arrive together in a folder named after the export date.
+ */
 export function exportForAnalysis(): Promise<void> {
-  const prefix = `logbook-${today()}`;
-  const files = buildAnalysisTables(dataStore.get()).map(table => ({
-    name: `${prefix}-${table.name}.csv`,
-    text: toCsv(table),
-    type: 'text/csv',
-  }));
-  return shareOrDownload(files);
+  const folder = `logbook-${today()}`;
+  const encoder = new TextEncoder();
+  const files = buildAnalysisTables(dataStore.get())
+    .map((table): [string, Uint8Array] => [`${folder}/${table.name}.csv`, encoder.encode(toCsv(table))]);
+  return shareOrDownload({ name: `${folder}.zip`, data: zip(files), type: 'application/zip' });
 }
 
 export function exportBackup(): Promise<void> {
@@ -58,9 +57,9 @@ export function exportBackup(): Promise<void> {
     trackers: [...data.trackers.values()],
     entries: [...data.entries.values()],
   };
-  return shareOrDownload([{
+  return shareOrDownload({
     name: `logbook-backup-${today()}.json`,
-    text: JSON.stringify(backup, null, 1),
+    data: JSON.stringify(backup, null, 1),
     type: 'application/json',
-  }]);
+  });
 }

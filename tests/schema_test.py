@@ -98,23 +98,29 @@ with tempfile.TemporaryDirectory() as data_dir:
         episodes = rows(cur, 'select * from public.episodes_readable order by start_utc')
         by_id = {str(r['episode_id']): r for r in episodes}
         check('episodes: five, oldest first', [str(r['episode_id']) for r in episodes] == [E(8), E(12), E(18), E(19), E(23)])
-        check('episodes: levels and notes', matches(by_id[E(8)], {
+        check('episodes: start, end, levels and notes', matches(by_id[E(8)], {
             'tracker': 'Headache', 'start_time': '10:00', 'end_time': '12:00', 'duration_min': 120, 'status': 'ended',
-            'max_level': 3, 'max_level_label': 'Severe', 'levels_logged': 2, 'notes': 'woke with it'}))
+            'max_level': 3, 'max_level_label': 'Severe', 'levels_logged': 2, 'notes': 'woke with it'})
+              and str(by_id[E(8)]['start']) == '2026-09-01 10:00:00' and str(by_id[E(8)]['end']) == '2026-09-01 12:00:00')
+        check('episodes: timeline of what happened in between', matches(by_id[E(8)], {
+            'timeline': '10:00 started · 10:30 Moderate · 11:00 Severe · 11:30 Coffee · 12:00 ended'}))
         check('episodes: across midnight', matches(by_id[E(12)], {
-            'start_time': '22:00', 'end_time': '01:30', 'duration_min': 210})
+            'start_time': '22:00', 'end_time': '01:30', 'duration_min': 210, 'timeline': '22:00 started · 09-02 01:30 ended'})
               and str(by_id[E(12)]['start_date']) == '2026-09-01' and str(by_id[E(12)]['end_date']) == '2026-09-02')
-        check('episodes: restarted', matches(by_id[E(18)], {'duration_min': 60, 'status': 'restarted'})
+        check('episodes: restarted', matches(by_id[E(18)], {'duration_min': 60, 'status': 'restarted', 'timeline': '15:00 started · 16:00 restarted'})
               and matches(by_id[E(19)], {'duration_min': 30, 'status': 'ended'}))
-        check('episodes: ongoing', matches(by_id[E(23)], {'status': 'ongoing', 'end_date': None, 'end_utc': None}))
+        check('episodes: ongoing', matches(by_id[E(23)], {'status': 'ongoing', 'end': None, 'end_date': None, 'end_utc': None,
+                                                         'timeline': '07:00 started · 09:00 Mood: Okay'}))
 
         entries = {str(r['entry_id']): r for r in rows(cur, 'select * from public.entries_readable')}
-        check('entries: deleted left out', len(entries) == 22 and E(21) not in entries)
+        check('entries: deleted left out', len(entries) == 24 and E(21) not in entries)
         check('entries: level linked to episode', matches(entries[E(9)], {'event': 'level', 'value': 2, 'label': 'Moderate'})
               and str(entries[E(9)]['episode_id']) == E(8))
         check('entries: end linked to episode', str(entries[E(13)]['episode_id']) == E(12) and str(entries[E(20)]['episode_id']) == E(19))
         check('entries: answer in local time', matches(entries[E(6)], {'event': 'answer', 'time': '20:00', 'weekday': 'Tue'})
-              and str(entries[E(6)]['date']) == '2026-09-01')
+              and str(entries[E(6)]['date']) == '2026-09-01' and str(entries[E(6)]['datetime']) == '2026-09-01 20:00:00')
+        check('entries: during other episodes', matches(entries[E(24)], {'tracker': 'Coffee', 'during': 'Headache', 'during_episode_ids': E(8)})
+              and matches(entries[E(25)], {'during': 'Tired'}) and matches(entries[E(9)], {'during': None}) and matches(entries[E(19)], {'during': None}))
         check('entries: text answer in text column', matches(entries[E(5)], {'text': 'Slept ok', 'label': None}))
 
         daily = {(str(r['date']), r['tracker']): r for r in rows(cur, 'select * from public.daily_summary')}
@@ -125,7 +131,7 @@ with tempfile.TemporaryDirectory() as data_dir:
             matches(daily[('2026-09-01', 'Journal')], {'answer_text': 'Slept ok'}),
             matches(daily[('2026-09-01', 'Headache')], {'episodes': 1, 'episode_minutes': 120, 'max_level': 3}),
             matches(daily[('2026-09-01', 'Tired')], {'episodes': 1, 'episode_minutes': 120}),
-            matches(daily[('2026-09-01', 'Coffee')], {'moments': 2}),
+            matches(daily[('2026-09-01', 'Coffee')], {'moments': 3}),
         ]))
         check('daily: Sep 2', all([
             matches(daily[('2026-09-02', 'Mood')], {'value_avg': 5}),
@@ -135,6 +141,7 @@ with tempfile.TemporaryDirectory() as data_dir:
             ('2026-09-02', 'Coffee') not in daily,   # the only coffee that day was deleted
         ]))
         check('daily: running episode', matches(daily[('2026-09-04', 'Tired')], {'episodes': 1, 'episode_minutes': 1020})
+              and matches(daily[('2026-09-04', 'Mood')], {'value_avg': 3})
               and matches(daily[('2026-09-05', 'Tired')], {'episode_minutes': 1440}))
         check('daily: weekday', daily[('2026-09-02', 'Mood')]['weekday'] == 'Wed')
 

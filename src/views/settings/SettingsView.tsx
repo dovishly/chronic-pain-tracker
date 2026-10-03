@@ -56,7 +56,7 @@ export function SettingsView() {
         <h2>Your data</h2>
         <div className="panel stack">
           <p className="small muted">
-            Everything is saved on this device first. <b>Export for analysis</b> gives five spreadsheets (CSV)
+            Everything is saved on this device first. <b>Export for analysis</b> gives one .zip of five spreadsheets (CSV)
             that line up by date and id: daily, check-ins, episodes, entries and trackers. <b>Export backup</b> is
             one file with everything.
           </p>

@@ -83,21 +83,18 @@ def check(name, cond):
     results.append((name, bool(cond))); print(('PASS ' if cond else 'FAIL ') + name)
 
 def export_tables(page):
-    """Clicks Export for analysis and returns {table name: (csv text, rows as dicts)}."""
-    downloads = []
-    def collect(download): downloads.append(download)
-    page.on('download', collect)
-    page.locator('#exportAnalysis').click()
-    for _ in range(60):
-        if len(downloads) >= 5: break
-        page.wait_for_timeout(100)
-    page.remove_listener('download', collect)
-    tables = {}
-    for d in downloads:
-        name = d.suggested_filename.rsplit('-', 1)[1][:-len('.csv')]   # logbook-2026-10-03-daily.csv -> daily
-        text = open(d.path(), encoding='utf-8').read()
-        tables[name] = (text, list(csv.DictReader(text.splitlines())))
-    return tables
+    """Clicks Export for analysis and returns {table name: list of row dicts} from the CSVs in the .zip."""
+    import zipfile
+    with page.expect_download() as download:
+        page.locator('#exportAnalysis').click()
+    name = download.value.suggested_filename
+    archive = zipfile.ZipFile(download.value.path())
+    folder = name[:-len('.zip')]
+    check('export is one zip of five CSVs in a dated folder', re.match(r'logbook-\d{4}-\d{2}-\d{2}\.zip$', name)
+          and sorted(archive.namelist()) == sorted(f'{folder}/{t}.csv' for t in ['daily', 'checkins', 'episodes', 'entries', 'trackers'])
+          and archive.testzip() is None)
+    return {member.split('/')[-1][:-len('.csv')]: list(csv.DictReader(archive.read(member).decode('utf-8').splitlines()))
+            for member in archive.namelist()}
 
 INJECT_FIXTURE = '''async (fixture) => {
   const db = await new Promise((resolve, reject) => {
@@ -192,11 +189,14 @@ with sync_playwright() as p:
 
     # export for analysis
     tables = export_tables(pg)
-    check('export has five tables', sorted(tables) == ['checkins', 'daily', 'entries', 'episodes', 'trackers'])
-    entries_csv = tables['entries'][0]
-    check('entries header', entries_csv.startswith('entry_id,date,time,weekday,timestamp_utc,tracker_id,tracker,type,group,event,value,label,text,note,checkin_id,episode_id'))
-    check('entries rows', ',Sleepy,episode,Symptoms,end,' in entries_csv and ',Mood,rating,Check-in,answer,4,Good,' in entries_csv and 'second cup' in entries_csv)
-    check('entries exclude undone', entries_csv.count('Coffee') == 1)
+    log_rows = tables['entries']
+    check('entries columns', list(log_rows[0]) == ['entry_id', 'datetime', 'date', 'time', 'weekday', 'timestamp_utc', 'tracker_id', 'tracker', 'type', 'group',
+                                                  'event', 'value', 'label', 'text', 'note', 'checkin_id', 'episode_id', 'during', 'during_episode_ids'])
+    check('entries have real timestamps', all(re.match(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', r['datetime']) for r in log_rows))
+    check('entries rows', any(r['tracker'] == 'Sleepy' and r['event'] == 'end' for r in log_rows)
+          and any(r['tracker'] == 'Mood' and r['event'] == 'answer' and r['value'] == '4' and r['label'] == 'Good' for r in log_rows)
+          and any(r['note'] == 'second cup' for r in log_rows))
+    check('entries exclude undone', sum(r['tracker'] == 'Coffee' for r in log_rows) == 1)
 
     # ---------- sync ----------
     pg.fill('#cfgUrl', 'http://example.com'); pg.fill('#cfgKey', 'anon-key-0123456789abcdefghij'); pg.locator('#cfgSave').click(); pg.wait_for_timeout(100)
@@ -213,7 +213,7 @@ with sync_playwright() as p:
     pg.fill('#authCode', '123456'); pg.locator('#authVerify').click(); pg.wait_for_timeout(1500)
     n_entries = len([r for r in DB['entries'].values()])
     check('uploaded trackers', len(DB['trackers']) == 16)
-    check('uploaded entries', n_entries == len(tables['entries'][1]) + 1)  # +1 = undone coffee synced as deleted
+    check('uploaded entries', n_entries == len(log_rows) + 1)  # +1 = undone coffee synced as deleted
     check('deleted flag synced', any(r['deleted'] for r in DB['entries'].values()))
     check('pill synced', 'Synced' in pg.locator('#syncPill').inner_text())
     pg.screenshot(path=OUT + '/settings-synced.png', full_page=True)
@@ -289,51 +289,59 @@ with sync_playwright() as p:
         if wrong: print('   mismatch:', wrong)
         return not wrong
 
-    daily = {r['date']: r for r in tables['daily'][1]}
+    daily = {r['date']: r for r in tables['daily']}
     check('daily: one row per day, gaps included', all(d in daily for d in ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04']))
     check('daily: Sep 1', matches(daily['2026-09-01'], {
         'weekday': 'Tue', 'checkins': '2', 'Mood (avg)': '3', 'Water (total)': '8', 'Water (avg)': '4',
         'Activities: Exercise': '1', 'Activities: Work': '1', 'Activities: Friends': '0', 'Journal (text)': 'Slept ok',
         'Headache (episodes)': '1', 'Headache (minutes)': '120', 'Headache (max level)': '3',
-        'Tired (episodes)': '1', 'Tired (minutes)': '120', 'Coffee (count)': '2', 'Snack (count)': '0'}))
+        'Tired (episodes)': '1', 'Tired (minutes)': '120', 'Coffee (count)': '3', 'Snack (count)': '0'}))
     check('daily: Sep 2', matches(daily['2026-09-02'], {
         'weekday': 'Wed', 'checkins': '1', 'Mood (avg)': '5', 'Water (total)': '', 'Activities: Friends': '1',
         'Activities: Exercise': '0', 'Headache (episodes)': '2', 'Headache (minutes)': '90', 'Headache (max level)': '',
         'Tired (episodes)': '0', 'Tired (minutes)': '90', 'Coffee (count)': '0', 'Snack (count)': '1'}))
     check('daily: empty day', matches(daily['2026-09-03'], {
         'checkins': '0', 'Mood (avg)': '', 'Activities: Exercise': '', 'Tired (minutes)': '0', 'Coffee (count)': '0'}))
-    check('daily: running episode', matches(daily['2026-09-04'], {'Tired (episodes)': '1', 'Tired (minutes)': '1020'})
+    check('daily: running episode', matches(daily['2026-09-04'], {'Tired (episodes)': '1', 'Tired (minutes)': '1020', 'Mood (avg)': '3'})
           and matches(daily['2026-09-05'], {'Tired (minutes)': '1440'}))
-    check('daily: no level column without levels', 'Tired (max level)' not in tables['daily'][1][0])
+    check('daily: no level column without levels', 'Tired (max level)' not in tables['daily'][0])
 
-    episodes = {r['episode_id']: r for r in tables['episodes'][1]}
-    check('episodes: five, oldest first', [r['episode_id'] for r in tables['episodes'][1]] == [E(8), E(12), E(18), E(19), E(23)])
-    check('episodes: levels and notes', matches(episodes[E(8)], {
-        'tracker': 'Headache', 'start_date': '2026-09-01', 'start_time': '10:00', 'end_time': '12:00', 'duration_min': '120',
+    episodes = {r['episode_id']: r for r in tables['episodes']}
+    check('episodes: five, oldest first', [r['episode_id'] for r in tables['episodes']] == [E(8), E(12), E(18), E(19), E(23)])
+    check('episodes: start, end, levels and notes', matches(episodes[E(8)], {
+        'tracker': 'Headache', 'start': '2026-09-01 10:00:00', 'end': '2026-09-01 12:00:00', 'duration_min': '120',
+        'start_date': '2026-09-01', 'start_time': '10:00', 'end_time': '12:00',
         'status': 'ended', 'max_level': '3', 'max_level_label': 'Severe', 'levels_logged': '2', 'notes': 'woke with it'}))
+    check('episodes: timeline of what happened in between', matches(episodes[E(8)], {
+        'timeline': '10:00 started · 10:30 Moderate · 11:00 Severe · 11:30 Coffee · 12:00 ended'}))
     check('episodes: across midnight', matches(episodes[E(12)], {
-        'start_date': '2026-09-01', 'start_time': '22:00', 'end_date': '2026-09-02', 'end_time': '01:30', 'duration_min': '210'}))
-    check('episodes: restarted', matches(episodes[E(18)], {'duration_min': '60', 'status': 'restarted'})
+        'start_date': '2026-09-01', 'start_time': '22:00', 'end_date': '2026-09-02', 'end_time': '01:30', 'duration_min': '210',
+        'end': '2026-09-02 01:30:00', 'timeline': '22:00 started · 09-02 01:30 ended'}))
+    check('episodes: restarted', matches(episodes[E(18)], {'duration_min': '60', 'status': 'restarted', 'timeline': '15:00 started · 16:00 restarted'})
           and matches(episodes[E(19)], {'duration_min': '30', 'status': 'ended'}))
-    check('episodes: ongoing', matches(episodes[E(23)], {'status': 'ongoing', 'end_date': '', 'start_date': '2026-09-04'}))
+    check('episodes: ongoing', matches(episodes[E(23)], {'status': 'ongoing', 'end': '', 'end_date': '', 'start_date': '2026-09-04',
+                                                         'timeline': '07:00 started · 09:00 Mood: Okay'}))
 
-    checkins = {r['checkin_id']: r for r in tables['checkins'][1]}
-    check('checkins: one row each', len(checkins) == 3)
+    checkins = {r['checkin_id']: r for r in tables['checkins']}
+    check('checkins: one row each', len(checkins) == 4)
     check('checkins: answers side by side', matches(checkins[C(1)], {
         'date': '2026-09-01', 'time': '09:00', 'Mood': '4', 'Water': '3', 'Activities: Exercise': '1',
         'Activities: Work': '1', 'Activities: Friends': '0', 'Journal': 'Slept ok'}))
     check('checkins: local date, skipped question blank', matches(checkins[C(2)], {
-        'date': '2026-09-01', 'time': '20:00', 'Mood': '2', 'Water': '5', 'Activities: Exercise': ''}))
+        'datetime': '2026-09-01 20:00:00', 'date': '2026-09-01', 'time': '20:00', 'Mood': '2', 'Water': '5', 'Activities: Exercise': '', 'during': ''}))
+    check('checkins: during an episode', matches(checkins[C(4)], {'Mood': '3', 'during': 'Tired'}))
     check('checkins: notes', matches(checkins[C(3)], {'Mood': '5', 'Water': '', 'Activities: Friends': '1', 'notes': 'Mood: after a run'}))
 
-    entries = {r['entry_id']: r for r in tables['entries'][1]}
-    check('entries: deleted left out', len(entries) == 22 and E(21) not in entries)
+    entries = {r['entry_id']: r for r in tables['entries']}
+    check('entries: deleted left out', len(entries) == 24 and E(21) not in entries)
     check('entries: level linked to episode', matches(entries[E(9)], {'event': 'level', 'value': '2', 'label': 'Moderate', 'episode_id': E(8)}))
     check('entries: end linked to episode', matches(entries[E(13)], {'episode_id': E(12)}) and matches(entries[E(20)], {'episode_id': E(19)}))
-    check('entries: answer in local time', matches(entries[E(6)], {'event': 'answer', 'date': '2026-09-01', 'time': '20:00', 'timestamp_utc': '2026-09-02T00:00:00.000Z'}))
+    check('entries: answer in local time', matches(entries[E(6)], {'event': 'answer', 'datetime': '2026-09-01 20:00:00', 'date': '2026-09-01', 'time': '20:00', 'timestamp_utc': '2026-09-02T00:00:00.000Z'}))
+    check('entries: during other episodes', matches(entries[E(24)], {'tracker': 'Coffee', 'during': 'Headache', 'during_episode_ids': E(8)})
+          and matches(entries[E(25)], {'during': 'Tired'}) and matches(entries[E(9)], {'during': ''}) and matches(entries[E(19)], {'during': ''}))
     check('entries: text answer in text column', matches(entries[E(5)], {'text': 'Slept ok', 'label': ''}))
 
-    trackers = {r['tracker']: r for r in tables['trackers'][1]}
+    trackers = {r['tracker']: r for r in tables['trackers']}
     check('trackers: archived with history included', matches(trackers['Snack'], {'archived': 'true'}) and len(trackers) == 8)
     check('trackers: levels and options spelled out', matches(trackers['Mood'], {'levels': '1=Awful; 2=Bad; 3=Okay; 4=Good; 5=Great'})
           and matches(trackers['Activities'], {'options': 'Exercise; Work; Friends', 'multiple_choice': 'true'}))
