@@ -1,7 +1,7 @@
 {
   "name": "Logbook",
   "short_name": "Logbook",
-  "description": "A personal tracker for check-ins, symptoms and moments.",
+  "description": "A personal tracker for symptoms, episodes, and moments.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
