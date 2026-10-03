@@ -3,7 +3,7 @@
 import { nowIso, uuid } from './util';
 import { db } from './db';
 import { trackers, entries, pendingKeys, dataChanged } from './data';
-import { STARTER_TRACKERS, type Entry, type Tracker } from './model';
+import { STARTER_TRACKERS, normalizeEntry, normalizeTracker, type Entry, type Tracker } from './model';
 import { sync, type OutboxItem } from './sync';
 
 /** The row sent to Supabase: exactly the table's columns, with defaults filled in. */
@@ -47,12 +47,18 @@ export async function saveTracker(tracker: Tracker): Promise<void> {
 /** Loads everything from IndexedDB into memory. A brand-new device gets the starter trackers. */
 export async function loadFromDevice(): Promise<void> {
   const [savedTrackers, savedEntries, outbox] = await Promise.all([
-    db.all<Tracker>('trackers'),
-    db.all<Entry>('entries'),
+    db.all<Record<string, unknown>>('trackers'),
+    db.all<Record<string, unknown>>('entries'),
     db.all<OutboxItem>('outbox'),
   ]);
-  for (const tracker of savedTrackers) trackers.set(tracker.id, { ...tracker, config: tracker.config || {} });
-  for (const entry of savedEntries) entries.set(entry.id, entry);
+  for (const raw of savedTrackers) {
+    const tracker = normalizeTracker(raw);
+    trackers.set(tracker.id, tracker);
+  }
+  for (const raw of savedEntries) {
+    const entry = normalizeEntry(raw);
+    entries.set(entry.id, entry);
+  }
   for (const item of outbox) pendingKeys.add(item.key);
   dataChanged();
 

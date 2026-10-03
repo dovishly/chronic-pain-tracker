@@ -2,7 +2,7 @@
 // so answers survive switching tabs until they're saved.
 import { useEffect, type Dispatch, type SetStateAction } from 'react';
 import { useData } from '../hooks';
-import { toDateTimeInputValue } from '../lib/util';
+import { toDateTimeInputValue, unhandled } from '../lib/util';
 import { CHECKIN_TYPES, groupTrackers, sortedTrackers, type Tracker } from '../lib/model';
 import { saveCheckin, type Answer } from '../lib/actions';
 import { colorStyle } from '../components/style';
@@ -40,7 +40,7 @@ export function CheckinView({ draft, onChange, onSaved }: Props) {
   return (
     <section id="view-checkin" className="stack">
       <div className="panel">
-        <label className="f" htmlFor="ciTime">
+        <label className="field" htmlFor="ciTime">
           When
           <input
             type="datetime-local"
@@ -71,10 +71,10 @@ export function CheckinView({ draft, onChange, onSaved }: Props) {
             </section>
           ))
         ) : (
-          <p className="empty">No check-in questions yet. Add a Rating, Number, Choices or Note tracker in Settings.</p>
+          <p className="empty-note">No check-in questions yet. Add a Rating, Number, Choices or Note tracker in Settings.</p>
         )}
       </div>
-      <button className="btn primary block" id="ciSave" type="button" onClick={save}>Save check-in</button>
+      <button className="button primary full-width" id="ciSave" type="button" onClick={save}>Save check-in</button>
       <p className="muted small">Every question is optional. Only what you answer is saved.</p>
     </section>
   );
@@ -90,10 +90,10 @@ function Question({ tracker, answer, onAnswer }: QuestionProps) {
   const levels = (tracker.config.levels || []).filter(Boolean);
   const pickedLabel = tracker.type === 'rating' && typeof answer === 'number' ? levels[answer - 1] : '';
   return (
-    <div className="q">
-      <div className="qh">
+    <div className="question">
+      <div className="question-header">
         <h3>{tracker.name}</h3>
-        <span className="picked">{pickedLabel}</span>
+        <span className="question-answer">{pickedLabel}</span>
       </div>
       <AnswerInput tracker={tracker} answer={answer} onAnswer={onAnswer} levels={levels} />
     </div>
@@ -106,7 +106,7 @@ function AnswerInput({ tracker, answer, onAnswer, levels }: QuestionProps & { le
       // Tapping the picked level again clears the answer.
       return (
         <>
-          <div className="seg5" style={colorStyle(tracker.color)}>
+          <div className="rating-scale" style={colorStyle(tracker.color)}>
             {levels.map((label, i) => (
               <button
                 key={i}
@@ -121,7 +121,7 @@ function AnswerInput({ tracker, answer, onAnswer, levels }: QuestionProps & { le
               </button>
             ))}
           </div>
-          <div className="ends">
+          <div className="rating-ends">
             <span>{levels[0] || ''}</span>
             <span>{levels[levels.length - 1] || ''}</span>
           </div>
@@ -131,7 +131,7 @@ function AnswerInput({ tracker, answer, onAnswer, levels }: QuestionProps & { le
     case 'number': {
       const { min, max, step, unit } = tracker.config;
       return (
-        <div className="numrow">
+        <div className="number-row">
           <input
             type="number"
             inputMode="decimal"
@@ -157,7 +157,7 @@ function AnswerInput({ tracker, answer, onAnswer, levels }: QuestionProps & { le
         else onAnswer(tracker.config.multi ? [...picked, option] : [option]);
       };
       return (
-        <div className="chips" style={colorStyle(tracker.color)}>
+        <div className="chip-list" style={colorStyle(tracker.color)}>
           {options.map(option => (
             <button
               key={option}
@@ -173,7 +173,7 @@ function AnswerInput({ tracker, answer, onAnswer, levels }: QuestionProps & { le
       );
     }
 
-    default: // text
+    case 'text':
       return (
         <textarea
           id={`checkin-text-${tracker.id}`}
@@ -183,5 +183,12 @@ function AnswerInput({ tracker, answer, onAnswer, levels }: QuestionProps & { le
           onChange={e => onAnswer(e.target.value)}
         />
       );
+
+    case 'episode':
+    case 'moment':
+      return null; // tapped on Today, not asked in a check-in
+
+    default:
+      return unhandled(tracker.type, null);
   }
 }

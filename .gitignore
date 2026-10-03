@@ -4,3 +4,8 @@ dev-dist/
 tests/screenshots/
 __pycache__/
 .DS_Store
+.env
+.env.*
+!.env.example
+.venv/
+venv/

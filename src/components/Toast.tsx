@@ -8,7 +8,7 @@ export function Toast() {
   // The key replays the entrance animation for every new toast.
   return (
     <div className="toast" role="status" key={toast.id}>
-      <span className="msg">{toast.message}</span>
+      <span className="toast-message">{toast.message}</span>
       {entryId && (
         <>
           <button type="button" onClick={() => moveEntryEarlier(entryId, 5)}>−5 min</button>

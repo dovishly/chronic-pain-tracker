@@ -21,26 +21,26 @@ export function TodayView({ shownDay, onShowDay }: Props) {
   const moments = sortedTrackers(data, 'moment');
 
   return (
-    <section id="view-today" className="stack" style={{ gap: 22 }}>
+    <section id="view-today" className="stack spacious">
       <section aria-labelledby="now-h">
         <h2 id="now-h">On now</h2>
-        <div className="now" id="now">
+        <div className="running-list" id="now">
           {Object.keys(active).length ? (
             Object.entries(active).map(([trackerId, episode]) => (
               <RunningPill key={trackerId} tracker={data.trackers.get(trackerId)!} episode={episode} now={now} />
             ))
           ) : (
-            <span className="empty">Nothing running. Tap a button below when something starts, and again when it stops.</span>
+            <span className="empty-note">Nothing running. Tap a button below when something starts, and again when it stops.</span>
           )}
         </div>
       </section>
 
-      <div id="episodes" className="stack" style={{ gap: 22 }}>
+      <div id="episodes" className="stack spacious">
         {episodeGroups.length ? (
           episodeGroups.map(([group, trackers]) => (
             <section key={group}>
               <h2>{group}</h2>
-              <div className="grid">
+              <div className="episode-grid">
                 {trackers.map(tracker => (
                   <EpisodeCard key={tracker.id} tracker={tracker} episode={active[tracker.id]} now={now} />
                 ))}
@@ -48,19 +48,19 @@ export function TodayView({ shownDay, onShowDay }: Props) {
             </section>
           ))
         ) : (
-          <p className="empty">No start/stop trackers yet. Add one in Settings.</p>
+          <p className="empty-note">No start/stop trackers yet. Add one in Settings.</p>
         )}
       </div>
 
       {moments.length > 0 && (
         <section aria-labelledby="marks-h" id="marksWrap">
           <h2 id="marks-h">Moments</h2>
-          <div className="marks" id="marks">
+          <div className="moment-buttons" id="marks">
             {moments.map(tracker => (
               <button
                 key={tracker.id}
                 type="button"
-                className="mark"
+                className="moment-button"
                 style={colorStyle(tracker.color)}
                 data-moment={tracker.id}
                 onClick={() => logMoment(tracker.id)}
@@ -82,7 +82,7 @@ function RunningPill({ tracker, episode, now }: { tracker: Tracker; episode: Act
   return (
     <button
       type="button"
-      className="pill"
+      className="running-pill"
       style={colorStyle(tracker.color)}
       data-episode={tracker.id}
       aria-label={`End ${tracker.name}, running since ${startedAt(episode.since)}`}
@@ -103,22 +103,22 @@ function EpisodeCard({ tracker, episode, now }: { tracker: Tracker; episode?: Ac
     : 'Tap when it starts';
 
   return (
-    <div className={episode ? 'card on' : 'card'} style={colorStyle(tracker.color)}>
+    <div className={episode ? 'episode-card is-running' : 'episode-card'} style={colorStyle(tracker.color)}>
       <button
         type="button"
-        className="main"
+        className="episode-button"
         data-episode={tracker.id}
         aria-pressed={!!episode}
         onClick={() => toggleEpisode(tracker.id)}
       >
-        <span className="name">
-          <span className="dot" />
+        <span className="episode-name">
+          <span className="color-dot" />
           <span>{tracker.name}</span>
         </span>
-        <span className="sub">{status}</span>
+        <span className="episode-status">{status}</span>
       </button>
       {episode && levels.length > 0 && (
-        <div className="levels" role="group" aria-label={`${tracker.name} level`}>
+        <div className="level-buttons" role="group" aria-label={`${tracker.name} level`}>
           {levels.map((label, i) => (
             <button
               key={i}

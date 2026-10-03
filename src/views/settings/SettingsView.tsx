@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useData } from '../../hooks';
 import { dayKey, dayLabel, uuid } from '../../lib/util';
 import { defaultConfig, entryTime, liveEntries, type Tracker } from '../../lib/model';
-import { exportBackup, exportCsv } from '../../lib/export';
+import { exportBackup, exportForAnalysis } from '../../lib/export';
 import { safely } from '../../lib/toast';
 import { TrackerEditor } from './TrackerEditor';
 import { ArchivedTrackers, TrackerList } from './TrackerList';
@@ -25,9 +25,9 @@ export function SettingsView() {
   return (
     <section id="view-settings" className="stack">
       <section>
-        <div className="row-between" style={{ marginBottom: 8 }}>
-          <h2 style={{ margin: 0 }}>Trackers</h2>
-          <button className="btn" id="addTracker" type="button" onClick={() => setEditing({ tracker: newTracker(), isNew: true })}>
+        <div className="row-between section-header">
+          <h2>Trackers</h2>
+          <button className="button" id="addTracker" type="button" onClick={() => setEditing({ tracker: newTracker(), isNew: true })}>
             Add tracker
           </button>
         </div>
@@ -56,11 +56,15 @@ export function SettingsView() {
         <h2>Your data</h2>
         <div className="panel stack">
           <p className="small muted">
-            Everything is saved on this device first. Export a spreadsheet for analysis, or a full backup file.
+            Everything is saved on this device first. <b>Export for analysis</b> gives five spreadsheets (CSV)
+            that line up by date and id: daily, check-ins, episodes, entries and trackers. <b>Export backup</b> is
+            one file with everything.
           </p>
-          <div className="btns">
-            <button className="btn primary" id="exportCsv" type="button" onClick={safely(exportCsv)}>Export CSV</button>
-            <button className="btn" id="exportJson" type="button" onClick={safely(exportBackup)}>Export backup</button>
+          <div className="button-row">
+            <button className="button primary" id="exportAnalysis" type="button" onClick={safely(exportForAnalysis)}>
+              Export for analysis
+            </button>
+            <button className="button" id="exportJson" type="button" onClick={safely(exportBackup)}>Export backup</button>
           </div>
           <p className="small muted" id="dataStats">{dataStats(liveEntries(data).map(entryTime))}</p>
         </div>

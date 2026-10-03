@@ -30,21 +30,21 @@ export function DaySection({ shownDay, onShowDay }: Props) {
   };
 
   return (
-    <section aria-labelledby="day-h">
+    <section className="day-section" aria-labelledby="day-h">
       <div className="row-between">
-        <h2 id="day-h" style={{ margin: 0 }}>Day</h2>
-        <div className="dnav">
-          <button className="iconbtn" id="prevDay" type="button" aria-label="Previous day"
+        <h2 id="day-h">Day</h2>
+        <div className="day-nav">
+          <button className="icon-button" id="prevDay" type="button" aria-label="Previous day"
             disabled={position <= 0} onClick={() => step(-1)}>‹</button>
-          <span className="dayname" id="dayName">{dayLabel(day)}</span>
-          <button className="iconbtn" id="nextDay" type="button" aria-label="Next day"
+          <span className="day-name" id="dayName">{dayLabel(day)}</span>
+          <button className="icon-button" id="nextDay" type="button" aria-label="Next day"
             disabled={position >= days.length - 1} onClick={() => step(1)}>›</button>
         </div>
       </div>
-      <div className="panel" style={{ marginTop: 10 }}>
+      <div className="panel">
         <Timeline dayStartMs={dayStart(day)} />
       </div>
-      <div className="panel" style={{ marginTop: 10 }}>
+      <div className="panel">
         <Log
           dayStartMs={dayStart(day)}
           openEntryId={openEntryId}
@@ -71,7 +71,7 @@ function Timeline({ dayStartMs }: { dayStartMs: number }) {
   const dayEndMs = dayStartMs + DAY_MS;
   const now = Date.now();
   const nowLine = now > dayStartMs && now < dayEndMs
-    ? <span className="nowline" style={{ left: percentOfDay(now - dayStartMs) }} />
+    ? <span className="timeline-now" style={{ left: percentOfDay(now - dayStartMs) }} />
     : null;
 
   const episodesToday = allEpisodes(data).filter(e => e.end > dayStartMs && e.start < dayEndMs);
@@ -83,18 +83,18 @@ function Timeline({ dayStartMs }: { dayStartMs: number }) {
     if (!spans.length) return [];
     const total = spans.reduce((sum, span) => sum + (span.to - span.from), 0);
     return [
-      <div className="srow" style={colorStyle(tracker.color)} key={tracker.id}>
-        <span className="slabel">
+      <div className="timeline-row" style={colorStyle(tracker.color)} key={tracker.id}>
+        <span className="timeline-label">
           {tracker.name}
-          <span className="stotal">{spans.length}× · {formatDuration(total)}</span>
+          <span className="timeline-total">{spans.length}× · {formatDuration(total)}</span>
         </span>
-        <div className="track">
+        <div className="timeline-track">
           {spans.map((span, i) => (
             <span
               key={i}
-              className="seg"
+              className="timeline-span"
               style={{ left: percentOfDay(span.from - dayStartMs), width: percentOfDay(span.to - span.from) }}
-              title={`${tracker.name} ${formatTime(span.start)}–${span.live ? 'now' : formatTime(span.end)}`}
+              title={`${tracker.name} ${formatTime(span.start)}–${span.status === 'ongoing' ? 'now' : formatTime(span.end)}`}
             />
           ))}
           {nowLine}
@@ -107,26 +107,26 @@ function Timeline({ dayStartMs }: { dayStartMs: number }) {
 
   if (!episodeRows.length && !moments.length) {
     return (
-      <div className="strip" id="strip">
-        <p className="empty">Start/stop episodes and moments appear here as a timeline.</p>
+      <div className="timeline" id="strip">
+        <p className="empty-note">Start/stop episodes and moments appear here as a timeline.</p>
       </div>
     );
   }
   return (
-    <div className="strip" id="strip">
+    <div className="timeline" id="strip">
       {episodeRows}
       {moments.length > 0 && (
-        <div className="srow">
-          <span className="slabel">
-            Moments<span className="stotal">{moments.length}×</span>
+        <div className="timeline-row">
+          <span className="timeline-label">
+            Moments<span className="timeline-total">{moments.length}×</span>
           </span>
-          <div className="track">
+          <div className="timeline-track">
             {moments.map(moment => {
               const tracker = data.trackers.get(moment.tracker_id)!;
               return (
                 <span
                   key={moment.id}
-                  className="tick"
+                  className="timeline-moment"
                   style={colorStyle(tracker.color, { left: percentOfDay(entryTime(moment) - dayStartMs) })}
                   title={`${tracker.name} ${formatTime(entryTime(moment))}`}
                 />
@@ -135,9 +135,9 @@ function Timeline({ dayStartMs }: { dayStartMs: number }) {
           </div>
         </div>
       )}
-      <div className="axis">
+      <div className="timeline-axis">
         <span />
-        <div className="ticks">
+        <div className="timeline-hours">
           {AXIS_LABELS.map(([label, left], i) => <span key={i} style={left ? { left } : undefined}>{label}</span>)}
         </div>
       </div>
@@ -164,9 +164,9 @@ function Log({ dayStartMs, openEntryId, onToggle, onClose }: LogProps) {
 
   if (!entries.length) {
     return (
-      <ul className="log" id="log">
+      <ul className="entry-log" id="log">
         <li>
-          <p className="empty" style={{ padding: '6px 2px' }}>
+          <p className="empty-note">
             Nothing logged this day. Tap any entry later to change its time, add a note, or delete it.
           </p>
         </li>
@@ -175,22 +175,22 @@ function Log({ dayStartMs, openEntryId, onToggle, onClose }: LogProps) {
   }
 
   return (
-    <ul className="log" id="log">
+    <ul className="entry-log" id="log">
       {entries.map(entry => {
         const tracker = data.trackers.get(entry.tracker_id)!;
         const episode = entry.kind === 'end' ? episodeByEnd[entry.id] : undefined;
         const description = entryText(entry, tracker) + (episode ? ` · ${formatDuration(episode.end - episode.start)}` : '');
         // Marker shape: dot for start/stop, diamond for moments, rounded square for check-in answers.
-        const shape = entry.kind === 'moment' ? ' m' : entry.kind === 'value' ? ' v' : '';
+        const marker = entry.kind === 'moment' ? ' is-moment' : entry.kind === 'value' ? ' is-answer' : '';
         const isOpen = openEntryId === entry.id;
         return (
           <li key={entry.id}>
-            <button type="button" className="lrow" aria-expanded={isOpen} onClick={() => onToggle(entry.id)}>
-              <span className="t mono">{formatTime(entryTime(entry))}</span>
-              <span className={'d' + shape} style={colorStyle(tracker.color)} />
-              <span className="what">
+            <button type="button" className="entry-row" aria-expanded={isOpen} onClick={() => onToggle(entry.id)}>
+              <span className="entry-time mono">{formatTime(entryTime(entry))}</span>
+              <span className={'entry-marker' + marker} style={colorStyle(tracker.color)} />
+              <span className="entry-text">
                 {description}
-                {entry.note && <span className="note">{entry.note}</span>}
+                {entry.note && <span className="entry-note">{entry.note}</span>}
               </span>
             </button>
             {isOpen && <EntryEditor entry={entry} onDone={onClose} />}
@@ -217,17 +217,17 @@ function EntryEditor({ entry, onDone }: { entry: Entry; onDone: () => void }) {
   };
 
   return (
-    <div className="edit">
-      <label className="f" htmlFor={`entry-time-${id}`}>
+    <div className="entry-editor">
+      <label className="field" htmlFor={`entry-time-${id}`}>
         Time
         <input type="time" id={`entry-time-${id}`} value={time} onChange={e => setTime(e.target.value)} />
       </label>
-      <label className="f" htmlFor={`entry-note-${id}`} style={{ flex: '1 1 180px' }}>
+      <label className="field note-field" htmlFor={`entry-note-${id}`}>
         Note
         <input type="text" id={`entry-note-${id}`} value={note} placeholder="Optional" onChange={e => setNote(e.target.value)} />
       </label>
-      <button type="button" className="btn primary" data-save-entry={id} onClick={save}>Save</button>
-      <button type="button" className="btn danger" onClick={remove}>Delete</button>
+      <button type="button" className="button primary" data-save-entry={id} onClick={save}>Save</button>
+      <button type="button" className="button danger" onClick={remove}>Delete</button>
     </div>
   );
 }

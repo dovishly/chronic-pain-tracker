@@ -26,8 +26,8 @@ export function App() {
 
   return (
     <>
-      <main className="wrap">
-        <div className="head">
+      <main className="page">
+        <div className="page-header">
           <h1 id="title">{VIEW_TITLES[view]}</h1>
           <SyncPill onClick={() => setView('settings')} />
         </div>

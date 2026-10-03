@@ -3,7 +3,7 @@
 import { prefs } from './util';
 import { db } from './db';
 import { trackers, entries, pendingKeys, dataChanged } from './data';
-import type { Entry, Tracker } from './model';
+import { normalizeEntry, normalizeTracker, type Entry, type Tracker } from './model';
 
 export type SyncStatus = 'local' | 'signedout' | 'syncing' | 'offline' | 'ok' | 'error' | 'needsChoice';
 
@@ -37,6 +37,15 @@ const PULL_PAGE = 1000;
 const REFRESH_MARGIN_MS = 90_000;      // refresh the access token once it has less than this left
 const SYNC_DELAY_AFTER_WRITE_MS = 700; // lets a burst of taps go up in one request
 
+/**
+ * The schema.sql version this app needs: public.logbook_schema_version() in the database must be at
+ * least this. Raise both together whenever schema.sql changes the tables (see "Changing the data model"
+ * in CLAUDE.md), so a phone never syncs against a database that's missing what it sends.
+ */
+const SCHEMA_VERSION = 1;
+const OUTDATED_SCHEMA_MESSAGE =
+  'Your Supabase database needs an update. Run the latest schema.sql in the Supabase SQL Editor (see the setup guide), then tap Sync now.';
+
 let config = prefs.get<Config>('cfg');
 let session = prefs.get<Session>('session');
 let status: SyncStatus = 'local';
@@ -46,6 +55,7 @@ let running = false;
 let runAgain = false;
 let writeTimer: ReturnType<typeof setTimeout> | undefined;
 let refreshing: Promise<void> | null = null; // the in-flight token refresh, shared by everyone who needs it
+let schemaChecked = false;                    // once per app session; "Sync now" after an error checks again
 
 const listeners = new Set<() => void>();
 let snapshot = buildSnapshot();
@@ -82,6 +92,9 @@ export class RequestError extends Error {
 
 /** Thrown by linkAccount while it waits for the owner to answer needsChoice. */
 class WaitingForChoice extends Error {}
+
+/** Thrown when the database's schema is older than this app needs. */
+class OutdatedSchema extends Error {}
 
 /* ---------- HTTP and auth ---------- */
 
@@ -139,7 +152,7 @@ async function request<T = unknown>(path: string, options: RequestOptions = {}, 
   }
   if (!response.ok) {
     const message = json && (json.msg || json.message || json.error_description || json.error);
-    const code = json && (json.code || json.error_code);
+    const code = json && (json.error_code || json.code); // Auth sends error_code (text) and code (the status)
     throw new RequestError(
       typeof message === 'string' ? message : `Request failed (${response.status})`,
       response.status,
@@ -221,14 +234,12 @@ async function pullChanges(): Promise<boolean> {
         if (pendingKeys.has(table + ':' + id)) continue; // the local edit wins until it's uploaded
         const local = table === 'trackers' ? trackers.get(id) : entries.get(id);
         if (local && local.updated_at === row.updated_at) continue;
-        const { user_id: _user, created_at: _created, ...item } = row; // drop server-only columns
         if (table === 'trackers') {
-          const tracker = { ...item, config: item.config || {} } as Tracker;
+          const tracker = normalizeTracker(row);
           trackers.set(id, tracker);
           updated.push(tracker);
         } else {
-          // Postgres numeric can arrive as a string.
-          const entry = { ...item, num: item.num == null ? null : Number(item.num) } as Entry;
+          const entry = normalizeEntry(row);
           entries.set(id, entry);
           updated.push(entry);
         }
@@ -246,6 +257,20 @@ async function pullChanges(): Promise<boolean> {
     }
   }
   return changed;
+}
+
+/** Makes sure the database has the tables and columns this app sends; see SCHEMA_VERSION. */
+async function checkSchema(): Promise<void> {
+  if (schemaChecked) return;
+  let version = 0;
+  try {
+    version = await request<number>('/rest/v1/rpc/logbook_schema_version', { method: 'POST', body: {} });
+  } catch (error) {
+    // 404: the function doesn't exist yet, so schema.sql is from before versions were tracked.
+    if (!(error instanceof RequestError && error.status === 404)) throw error;
+  }
+  if (version < SCHEMA_VERSION) throw new OutdatedSchema();
+  schemaChecked = true;
 }
 
 async function resetCursors(): Promise<void> {
@@ -293,6 +318,7 @@ async function run(): Promise<void> {
   running = true;
   setStatus('syncing');
   try {
+    await checkSchema();
     if (await db.getMeta<boolean>('needsLink')) await linkAccount();
     await flushOutbox();
     const changed = await pullChanges();
@@ -303,6 +329,9 @@ async function run(): Promise<void> {
   } catch (error) {
     if (error instanceof WaitingForChoice) {
       // Keep the needsChoice status until the owner answers.
+    } else if (error instanceof OutdatedSchema) {
+      status = 'error';
+      statusDetail = OUTDATED_SCHEMA_MESSAGE;
     } else if (!navigator.onLine || error instanceof TypeError) { // fetch throws TypeError when the network fails
       status = 'offline';
       statusDetail = '';
@@ -330,6 +359,29 @@ async function signOut(): Promise<void> {
   setStatus('signedout');
 }
 
+/**
+ * A project URL must be https, except a Supabase running on this computer or the home network
+ * (the local one from `supabase start` is http://127.0.0.1:54321). Throws a message for the person.
+ */
+function checkProjectUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('The project URL should start with https://');
+  }
+  if (parsed.protocol === 'https:') return;
+  const local = /^(localhost|127(\.\d+){3}|\[::1\]|10(\.\d+){3}|192\.168(\.\d+){2}|172\.(1[6-9]|2\d|3[01])(\.\d+){2}|[\w-]+\.local)$/
+    .test(parsed.hostname);
+  if (parsed.protocol !== 'http:' || !local) {
+    throw new Error('The project URL should start with https:// (http:// only works for a Supabase on this computer or your home network).');
+  }
+  // Browsers block http requests from an https page, so a local Supabase needs a local copy of the app.
+  if (location.protocol === 'https:') {
+    throw new Error('This copy of the app can only connect to https:// projects. To use a local Supabase, run the app with npm run dev.');
+  }
+}
+
 export const sync = {
   /** For useSyncExternalStore: the current SyncState, and change notifications. */
   get: (): SyncState => snapshot,
@@ -351,7 +403,7 @@ export const sync = {
   configure(url: string, key: string): void {
     url = url.trim();
     key = key.trim();
-    if (!/^https:\/\/[^\s/]+/.test(url)) throw new Error('The project URL should start with https://');
+    checkProjectUrl(url);
     if (key.length < 20) throw new Error('That key looks too short. Copy the full anon or publishable key.');
     config = { url: url.replace(/\/+$/, ''), key };
     prefs.set('cfg', config);

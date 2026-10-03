@@ -8,8 +8,8 @@ export const VIEW_TITLES: Record<View, string> = {
 
 export function TabBar({ current, onSelect }: { current: View; onSelect: (view: View) => void }) {
   return (
-    <nav className="tabs" aria-label="Sections">
-      <div className="in">
+    <nav className="tab-bar" aria-label="Sections">
+      <div className="tab-bar-inner">
         {(Object.keys(VIEW_TITLES) as View[]).map(view => (
           <button
             key={view}

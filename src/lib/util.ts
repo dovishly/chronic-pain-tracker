@@ -52,6 +52,19 @@ export function startedAt(ms: number): string {
   return dayKey(ms) === dayKey(Date.now()) ? time : `${dayLabel(dayKey(ms))} ${time}`;
 }
 
+/* ---------- exhaustive switches ---------- */
+
+/**
+ * Put this in the default branch of a switch that should handle every case, e.g. every tracker type:
+ *   default: return unhandled(tracker.type, null);
+ * TypeScript reports an error here when a case is missing (say, after adding a tracker type). At runtime
+ * it returns the fallback, so data from a newer version of the app (an unknown type) is skipped, not fatal.
+ */
+export function unhandled<T>(value: never, fallback: T): T {
+  void value;
+  return fallback;
+}
+
 /* ---------- ids ---------- */
 
 export function uuid(): string {

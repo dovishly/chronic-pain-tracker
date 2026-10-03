@@ -1,6 +1,6 @@
 // What the person can do that changes data. Components call these directly; the UI updates
 // because every save notifies the data store. Each action is wrapped in safely(), so a failure shows a toast.
-import { MINUTE_MS, formatTime, formatDuration, uuid } from './util';
+import { MINUTE_MS, formatTime, formatDuration, uuid, unhandled } from './util';
 import { dataStore } from './data';
 import {
   CHECKIN_TYPES, newEntry, entryTime, sortedTrackers, groupName, activeEpisodes,
@@ -100,15 +100,27 @@ export const saveCheckin = safely(async (answers: Record<string, Answer>, when: 
     const answer = answers[tracker.id];
     if (answer == null || answer === '' || (Array.isArray(answer) && !answer.length)) continue;
     const save = (values: Partial<Entry>) => saveEntry(newEntry(tracker.id, 'value', { ...fields, ...values }));
-    if (tracker.type === 'rating') {
-      const level = Number(answer);
-      await save({ num: level, txt: (tracker.config.levels || [])[level - 1] || null });
-    } else if (tracker.type === 'number') {
-      await save({ num: Number(answer) });
-    } else if (tracker.type === 'text') {
-      await save({ txt: String(answer) });
-    } else if (tracker.type === 'choice' && Array.isArray(answer)) {
-      for (const option of answer) await save({ txt: option }); // one entry per selected option
+    switch (tracker.type) {
+      case 'rating': {
+        const level = Number(answer);
+        await save({ num: level, txt: (tracker.config.levels || [])[level - 1] || null });
+        break;
+      }
+      case 'number':
+        await save({ num: Number(answer) });
+        break;
+      case 'text':
+        await save({ txt: String(answer) });
+        break;
+      case 'choice':
+        for (const option of [answer].flat()) await save({ txt: String(option) }); // one entry per selected option
+        break;
+      case 'episode':
+      case 'moment':
+        continue; // not check-in questions
+      default:
+        unhandled(tracker.type, null);
+        continue;
     }
     answered++;
   }

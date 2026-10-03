@@ -20,7 +20,7 @@ function pillContent({ status, waiting, lastSync }: SyncState): [string, string]
 export function SyncPill({ onClick }: { onClick: () => void }) {
   const [label, tone] = pillContent(useSyncState());
   return (
-    <button className={`sync ${tone}`} id="syncPill" type="button" onClick={onClick}>
+    <button className={`sync-pill ${tone}`} id="syncPill" type="button" onClick={onClick}>
       {label}
     </button>
   );

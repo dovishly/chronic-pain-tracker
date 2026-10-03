@@ -4,20 +4,41 @@
 
 export type StoreName = 'trackers' | 'entries' | 'outbox' | 'meta';
 
+/**
+ * Each function upgrades the database by one version; the browser runs the ones a device hasn't had yet,
+ * in order. To change the database (a new store or index), append a function. Never edit or remove
+ * one: phones may be on any older version.
+ */
+const UPGRADES: ((database: IDBDatabase, transaction: IDBTransaction) => void)[] = [
+  // Version 1: the original stores.
+  database => {
+    database.createObjectStore('trackers', { keyPath: 'id' });
+    database.createObjectStore('entries', { keyPath: 'id' });
+    database.createObjectStore('outbox', { keyPath: 'key' });
+    database.createObjectStore('meta', { keyPath: 'k' });
+  },
+];
+
 let opening: Promise<IDBDatabase> | null = null;
 
 function open(): Promise<IDBDatabase> {
   if (opening) return opening;
   opening = new Promise((resolve, reject) => {
-    const request = indexedDB.open('logbook', 1);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      database.createObjectStore('trackers', { keyPath: 'id' });
-      database.createObjectStore('entries', { keyPath: 'id' });
-      database.createObjectStore('outbox', { keyPath: 'key' });
-      database.createObjectStore('meta', { keyPath: 'k' });
+    const request = indexedDB.open('logbook', UPGRADES.length);
+    request.onupgradeneeded = event => {
+      for (let version = event.oldVersion; version < UPGRADES.length; version++) {
+        UPGRADES[version](request.result, request.transaction!);
+      }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const database = request.result;
+      // A newer version of the app opened in another tab wants to upgrade: step aside and reload into it.
+      database.onversionchange = () => {
+        database.close();
+        location.reload();
+      };
+      resolve(database);
+    };
     request.onerror = () => reject(request.error);
   });
   return opening;

@@ -1,0 +1,392 @@
+{
+ "about": "Test data for the analysis export (tests/e2e_test.py) and the SQL views (tests/schema_test.py). Local times are America/New_York. Both tests check the same expected figures.",
+ "timezone": "America/New_York",
+ "trackers": [
+  {
+   "id": "00000000-0000-4000-8000-000000000001",
+   "name": "Mood",
+   "type": "rating",
+   "grp": "Check-in",
+   "color": "indigo",
+   "config": {
+    "levels": [
+     "Awful",
+     "Bad",
+     "Okay",
+     "Good",
+     "Great"
+    ]
+   },
+   "sort": 10,
+   "archived": false
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000002",
+   "name": "Water",
+   "type": "number",
+   "grp": "Check-in",
+   "color": "sky",
+   "config": {
+    "unit": "glasses",
+    "min": 0,
+    "max": 30,
+    "step": 1
+   },
+   "sort": 20,
+   "archived": false
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000003",
+   "name": "Activities",
+   "type": "choice",
+   "grp": "Check-in",
+   "color": "green",
+   "config": {
+    "options": [
+     "Exercise",
+     "Work",
+     "Friends"
+    ],
+    "multi": true
+   },
+   "sort": 30,
+   "archived": false
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000004",
+   "name": "Journal",
+   "type": "text",
+   "grp": "Check-in",
+   "color": "slate",
+   "config": {},
+   "sort": 40,
+   "archived": false
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000005",
+   "name": "Headache",
+   "type": "episode",
+   "grp": "Symptoms",
+   "color": "amber",
+   "config": {
+    "levels": [
+     "Mild",
+     "Moderate",
+     "Severe"
+    ]
+   },
+   "sort": 50,
+   "archived": false
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000006",
+   "name": "Tired",
+   "type": "episode",
+   "grp": "Symptoms",
+   "color": "indigo",
+   "config": {
+    "levels": []
+   },
+   "sort": 60,
+   "archived": false
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000007",
+   "name": "Coffee",
+   "type": "moment",
+   "grp": "Moments",
+   "color": "amber",
+   "config": {},
+   "sort": 70,
+   "archived": false
+  },
+  {
+   "id": "00000000-0000-4000-8000-000000000008",
+   "name": "Snack",
+   "type": "moment",
+   "grp": "Moments",
+   "color": "green",
+   "config": {},
+   "sort": 80,
+   "archived": true
+  }
+ ],
+ "entries": [
+  {
+   "id": "00000000-0000-4000-9000-000000000001",
+   "tracker_id": "00000000-0000-4000-8000-000000000001",
+   "ts": "2026-09-01T13:00:00.000Z",
+   "kind": "value",
+   "num": 4,
+   "txt": "Good",
+   "note": null,
+   "checkin_id": "00000000-0000-4000-a000-000000000001",
+   "deleted": false,
+   "updated_at": "2026-09-01T13:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000002",
+   "tracker_id": "00000000-0000-4000-8000-000000000002",
+   "ts": "2026-09-01T13:00:00.000Z",
+   "kind": "value",
+   "num": 3,
+   "txt": null,
+   "note": null,
+   "checkin_id": "00000000-0000-4000-a000-000000000001",
+   "deleted": false,
+   "updated_at": "2026-09-01T13:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000003",
+   "tracker_id": "00000000-0000-4000-8000-000000000003",
+   "ts": "2026-09-01T13:00:00.000Z",
+   "kind": "value",
+   "num": null,
+   "txt": "Exercise",
+   "note": null,
+   "checkin_id": "00000000-0000-4000-a000-000000000001",
+   "deleted": false,
+   "updated_at": "2026-09-01T13:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000004",
+   "tracker_id": "00000000-0000-4000-8000-000000000003",
+   "ts": "2026-09-01T13:00:00.000Z",
+   "kind": "value",
+   "num": null,
+   "txt": "Work",
+   "note": null,
+   "checkin_id": "00000000-0000-4000-a000-000000000001",
+   "deleted": false,
+   "updated_at": "2026-09-01T13:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000005",
+   "tracker_id": "00000000-0000-4000-8000-000000000004",
+   "ts": "2026-09-01T13:00:00.000Z",
+   "kind": "value",
+   "num": null,
+   "txt": "Slept ok",
+   "note": null,
+   "checkin_id": "00000000-0000-4000-a000-000000000001",
+   "deleted": false,
+   "updated_at": "2026-09-01T13:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000006",
+   "tracker_id": "00000000-0000-4000-8000-000000000001",
+   "ts": "2026-09-02T00:00:00.000Z",
+   "kind": "value",
+   "num": 2,
+   "txt": "Bad",
+   "note": null,
+   "checkin_id": "00000000-0000-4000-a000-000000000002",
+   "deleted": false,
+   "updated_at": "2026-09-02T00:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000007",
+   "tracker_id": "00000000-0000-4000-8000-000000000002",
+   "ts": "2026-09-02T00:00:00.000Z",
+   "kind": "value",
+   "num": 5,
+   "txt": null,
+   "note": null,
+   "checkin_id": "00000000-0000-4000-a000-000000000002",
+   "deleted": false,
+   "updated_at": "2026-09-02T00:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000008",
+   "tracker_id": "00000000-0000-4000-8000-000000000005",
+   "ts": "2026-09-01T14:00:00.000Z",
+   "kind": "start",
+   "num": null,
+   "txt": null,
+   "note": "woke with it",
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-01T14:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000009",
+   "tracker_id": "00000000-0000-4000-8000-000000000005",
+   "ts": "2026-09-01T14:30:00.000Z",
+   "kind": "level",
+   "num": 2,
+   "txt": "Moderate",
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-01T14:30:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000010",
+   "tracker_id": "00000000-0000-4000-8000-000000000005",
+   "ts": "2026-09-01T15:00:00.000Z",
+   "kind": "level",
+   "num": 3,
+   "txt": "Severe",
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-01T15:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000011",
+   "tracker_id": "00000000-0000-4000-8000-000000000005",
+   "ts": "2026-09-01T16:00:00.000Z",
+   "kind": "end",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-01T16:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000012",
+   "tracker_id": "00000000-0000-4000-8000-000000000006",
+   "ts": "2026-09-02T02:00:00.000Z",
+   "kind": "start",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-02T02:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000013",
+   "tracker_id": "00000000-0000-4000-8000-000000000006",
+   "ts": "2026-09-02T05:30:00.000Z",
+   "kind": "end",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-02T05:30:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000014",
+   "tracker_id": "00000000-0000-4000-8000-000000000007",
+   "ts": "2026-09-01T12:00:00.000Z",
+   "kind": "moment",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-01T12:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000015",
+   "tracker_id": "00000000-0000-4000-8000-000000000007",
+   "ts": "2026-09-01T18:00:00.000Z",
+   "kind": "moment",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-01T18:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000016",
+   "tracker_id": "00000000-0000-4000-8000-000000000001",
+   "ts": "2026-09-02T13:00:00.000Z",
+   "kind": "value",
+   "num": 5,
+   "txt": "Great",
+   "note": "after a run",
+   "checkin_id": "00000000-0000-4000-a000-000000000003",
+   "deleted": false,
+   "updated_at": "2026-09-02T13:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000017",
+   "tracker_id": "00000000-0000-4000-8000-000000000003",
+   "ts": "2026-09-02T13:00:00.000Z",
+   "kind": "value",
+   "num": null,
+   "txt": "Friends",
+   "note": null,
+   "checkin_id": "00000000-0000-4000-a000-000000000003",
+   "deleted": false,
+   "updated_at": "2026-09-02T13:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000018",
+   "tracker_id": "00000000-0000-4000-8000-000000000005",
+   "ts": "2026-09-02T19:00:00.000Z",
+   "kind": "start",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-02T19:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000019",
+   "tracker_id": "00000000-0000-4000-8000-000000000005",
+   "ts": "2026-09-02T20:00:00.000Z",
+   "kind": "start",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-02T20:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000020",
+   "tracker_id": "00000000-0000-4000-8000-000000000005",
+   "ts": "2026-09-02T20:30:00.000Z",
+   "kind": "end",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-02T20:30:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000021",
+   "tracker_id": "00000000-0000-4000-8000-000000000007",
+   "ts": "2026-09-02T14:00:00.000Z",
+   "kind": "moment",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": true,
+   "updated_at": "2026-09-02T14:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000022",
+   "tracker_id": "00000000-0000-4000-8000-000000000008",
+   "ts": "2026-09-02T16:00:00.000Z",
+   "kind": "moment",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-02T16:00:00.000Z"
+  },
+  {
+   "id": "00000000-0000-4000-9000-000000000023",
+   "tracker_id": "00000000-0000-4000-8000-000000000006",
+   "ts": "2026-09-04T11:00:00.000Z",
+   "kind": "start",
+   "num": null,
+   "txt": null,
+   "note": null,
+   "checkin_id": null,
+   "deleted": false,
+   "updated_at": "2026-09-04T11:00:00.000Z"
+  }
+ ]
+}

@@ -1,10 +1,13 @@
 // The tracker/entry model: types, constants, and data derived from entries.
 // Field names on trackers and entries match the Supabase columns (see schema.sql and CLAUDE.md).
-import { dayKey, nowIso, uuid } from './util';
+import { dayKey, nowIso, uuid, unhandled } from './util';
 
 /* ---------- types ---------- */
 
-export type TrackerType = 'rating' | 'episode' | 'moment' | 'number' | 'choice' | 'text';
+// To add a tracker type or entry kind, add it here and follow the checklist in CLAUDE.md
+// ("Changing the data model"); TypeScript then points at every switch that must handle it.
+export const TRACKER_TYPES = ['rating', 'episode', 'moment', 'number', 'choice', 'text'] as const;
+export type TrackerType = (typeof TRACKER_TYPES)[number];
 
 export interface TrackerConfig {
   levels?: string[];      // rating: one label per level, lowest first; episode: optional severity labels
@@ -32,7 +35,8 @@ export interface Tracker {
  * start/end: an episode began or stopped. level: severity during an episode (num + label in txt).
  * moment: a one-tap moment. value: a check-in answer.
  */
-export type EntryKind = 'start' | 'end' | 'level' | 'moment' | 'value';
+export const ENTRY_KINDS = ['start', 'end', 'level', 'moment', 'value'] as const;
+export type EntryKind = (typeof ENTRY_KINDS)[number];
 
 export interface Entry {
   id: string;
@@ -89,7 +93,9 @@ export function defaultConfig(type: TrackerType): TrackerConfig {
     case 'episode': return { levels: [] };
     case 'number': return { unit: '', step: 1, min: null, max: null };
     case 'choice': return { options: [], multi: true };
-    default: return {};
+    case 'moment':
+    case 'text': return {};
+    default: return unhandled(type, {});
   }
 }
 
@@ -113,6 +119,24 @@ export const STARTER_TRACKERS: StarterTracker[] = [
   { name: 'Coffee', type: 'moment', grp: 'Moments', color: 'amber', config: {} },
   { name: 'Meal', type: 'moment', grp: 'Moments', color: 'green', config: {} },
 ];
+
+/* ---------- data from storage or the server ---------- */
+
+/**
+ * Fills in defaults for a tracker read from IndexedDB or Supabase. Rows saved by an older version
+ * of the app may lack newer fields: when you add a field, give it its default here.
+ */
+export function normalizeTracker(raw: Record<string, unknown>): Tracker {
+  const { user_id: _user, created_at: _created, ...tracker } = raw; // server-only columns
+  return { ...tracker, config: tracker.config || {} } as Tracker;
+}
+
+/** Fills in defaults for an entry read from IndexedDB or Supabase; see normalizeTracker. */
+export function normalizeEntry(raw: Record<string, unknown>): Entry {
+  const { user_id: _user, created_at: _created, ...entry } = raw;
+  // Postgres numeric can arrive as a string.
+  return { ...entry, num: entry.num == null ? null : Number(entry.num) } as Entry;
+}
 
 /* ---------- entries ---------- */
 
@@ -165,13 +189,14 @@ export function entryText(entry: Entry, tracker: Tracker): string {
     case 'start': return `${name} started`;
     case 'end': return `${name} ended`;
     case 'moment': return name;
+    case 'level': return `${name}: ${(entry.txt || entry.num) ?? ''}`;
+    case 'value': {
+      if (tracker.type !== 'number') return `${name}: ${(entry.txt || entry.num) ?? ''}`;
+      const unit = tracker.config.unit ? ' ' + tracker.config.unit : '';
+      return `${name}: ${entry.num ?? ''}${unit}`;
+    }
+    default: return unhandled(entry.kind, name);
   }
-  // A severity level or a check-in answer.
-  if (entry.kind === 'value' && tracker.type === 'number') {
-    const unit = tracker.config.unit ? ' ' + tracker.config.unit : '';
-    return `${name}: ${entry.num ?? ''}${unit}`;
-  }
-  return `${name}: ${(entry.txt || entry.num) ?? ''}`;
 }
 
 /* ---------- trackers ---------- */
@@ -223,11 +248,14 @@ export interface ActiveEpisode {
 }
 
 export interface Episode {
+  id: string;             // the start entry's id
   trackerId: string;
   start: number;
   end: number;            // "now" for an episode that's still running
   endEntryId?: string;
-  live?: boolean;         // still running
+  // ended: closed by an end entry; restarted: closed by a later start without an end in between;
+  // ongoing: still running.
+  status: 'ended' | 'restarted' | 'ongoing';
 }
 
 const isEpisodeEvent = (e: Entry) => e.kind === 'start' || e.kind === 'end';
@@ -255,27 +283,27 @@ export function activeEpisodes(data: Data): Record<string, ActiveEpisode> {
 }
 
 /**
- * Every start/stop episode. A second start without an end in between
+ * Every start/stop episode, oldest first. A second start without an end in between
  * closes the earlier episode at that point.
  */
 export function allEpisodes(data: Data): Episode[] {
   const episodes: Episode[] = [];
   const openStarts: Record<string, Entry> = {}; // trackerId -> its unmatched start entry
+  const close = (startEntry: Entry, end: number, status: Episode['status'], endEntryId?: string) =>
+    episodes.push({ id: startEntry.id, trackerId: startEntry.tracker_id, start: entryTime(startEntry), end, status, endEntryId });
+
   for (const e of liveEntries(data).filter(isEpisodeEvent).sort(byTime)) {
-    const id = e.tracker_id;
-    const openStart = openStarts[id];
+    const openStart = openStarts[e.tracker_id];
     if (e.kind === 'start') {
-      if (openStart) episodes.push({ trackerId: id, start: entryTime(openStart), end: entryTime(e) });
-      openStarts[id] = e;
+      if (openStart) close(openStart, entryTime(e), 'restarted');
+      openStarts[e.tracker_id] = e;
     } else if (openStart) {
-      episodes.push({ trackerId: id, start: entryTime(openStart), end: entryTime(e), endEntryId: e.id });
-      delete openStarts[id];
+      close(openStart, entryTime(e), 'ended', e.id);
+      delete openStarts[e.tracker_id];
     }
   }
-  for (const [id, startEntry] of Object.entries(openStarts)) {
-    episodes.push({ trackerId: id, start: entryTime(startEntry), end: Date.now(), live: true });
-  }
-  return episodes;
+  for (const startEntry of Object.values(openStarts)) close(startEntry, Date.now(), 'ongoing');
+  return episodes.sort((a, b) => a.start - b.start);
 }
 
 /** Episodes keyed by the id of their end entry, for showing durations next to "ended" entries. */

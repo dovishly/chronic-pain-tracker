@@ -7,12 +7,12 @@ import { colorStyle } from '../../components/style';
 function TrackerRow({ tracker, children }: { tracker: Tracker; children: ReactNode }) {
   return (
     <li>
-      <span className="dot" style={colorStyle(tracker.color)} />
-      <span className="tn">
+      <span className="color-dot" style={colorStyle(tracker.color)} />
+      <span className="tracker-name">
         {tracker.name}
-        <span className="tt">{TYPE_LABELS[tracker.type]}</span>
+        <span className="tracker-type">{TYPE_LABELS[tracker.type]}</span>
       </span>
-      <span className="acts">{children}</span>
+      <span className="tracker-actions">{children}</span>
     </li>
   );
 }
@@ -25,8 +25,8 @@ export function TrackerList({ onEdit }: { onEdit: (trackerId: string) => void })
       {groups.length ? (
         groups.map(([group, trackers]) => (
           <Fragment key={group}>
-            <h2 style={{ margin: '10px 0 2px' }}>{group}</h2>
-            <ul className="tlist">
+            <h2 className="tracker-list-group">{group}</h2>
+            <ul className="tracker-list">
               {trackers.map(tracker => (
                 <TrackerRow key={tracker.id} tracker={tracker}>
                   <button type="button" data-move-up={tracker.id} aria-label={`Move ${tracker.name} up`}
@@ -40,7 +40,7 @@ export function TrackerList({ onEdit }: { onEdit: (trackerId: string) => void })
           </Fragment>
         ))
       ) : (
-        <p className="empty">No trackers yet. Tap Add tracker.</p>
+        <p className="empty-note">No trackers yet. Tap Add tracker.</p>
       )}
     </div>
   );
@@ -50,10 +50,10 @@ export function ArchivedTrackers() {
   const archived = sortedTrackers(useData(), null, { includeArchived: true }).filter(t => t.archived);
   if (!archived.length) return null;
   return (
-    <details style={{ marginTop: 10 }} id="archWrap">
+    <details className="archived-trackers" id="archWrap">
       <summary>Archived trackers</summary>
-      <div className="panel" style={{ marginTop: 8 }}>
-        <ul className="tlist" id="archList">
+      <div className="panel">
+        <ul className="tracker-list" id="archList">
           {archived.map(tracker => (
             <TrackerRow key={tracker.id} tracker={tracker}>
               <button type="button" data-restore-tracker={tracker.id} onClick={() => restoreTracker(tracker.id)}>
