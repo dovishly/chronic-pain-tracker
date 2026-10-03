@@ -1,0 +1,159 @@
+// What the person can do that changes data. Components call these directly; the UI updates
+// because every save notifies the data store. Each action is wrapped in safely(), so a failure shows a toast.
+import { MINUTE_MS, formatTime, formatDuration, uuid } from './util';
+import { dataStore } from './data';
+import {
+  CHECKIN_TYPES, newEntry, entryTime, sortedTrackers, groupName, activeEpisodes,
+  type Entry, type EntryKind, type Tracker,
+} from './model';
+import { saveEntry, saveTracker } from './store';
+import { toast, safely } from './toast';
+
+const data = () => dataStore.get();
+const trackerById = (id: string) => data().trackers.get(id)!;
+
+/* ---------- entries ---------- */
+
+async function addEntry(trackerId: string, kind: EntryKind, fields?: Partial<Entry>): Promise<Entry> {
+  const entry = newEntry(trackerId, kind, fields);
+  await saveEntry(entry);
+  return entry;
+}
+
+/** Saves a changed copy of an entry. */
+async function changeEntry(id: string, changes: Partial<Entry>): Promise<void> {
+  const entry = data().entries.get(id);
+  if (entry) await saveEntry({ ...entry, ...changes });
+}
+
+/** Starts the tracker's episode, or ends it if it's running. */
+export const toggleEpisode = safely(async (trackerId: string) => {
+  const tracker = trackerById(trackerId);
+  const running = activeEpisodes(data())[trackerId];
+  if (running) {
+    const entry = await addEntry(trackerId, 'end');
+    toast(`${tracker.name} ended · ${formatDuration(entryTime(entry) - running.since)}`, entry.id);
+  } else {
+    const entry = await addEntry(trackerId, 'start');
+    toast(`${tracker.name} started ${formatTime(entryTime(entry))}`, entry.id);
+  }
+});
+
+/** Logs a severity level (1-based) for a running episode. */
+export const logLevel = safely(async (trackerId: string, level: number) => {
+  const tracker = trackerById(trackerId);
+  const label = (tracker.config.levels || [])[level - 1] || String(level);
+  const entry = await addEntry(trackerId, 'level', { num: level, txt: label });
+  toast(`${tracker.name}: ${label}`, entry.id);
+});
+
+export const logMoment = safely(async (trackerId: string) => {
+  const tracker = trackerById(trackerId);
+  const entry = await addEntry(trackerId, 'moment');
+  toast(`${tracker.name} at ${formatTime(entryTime(entry))}`, entry.id);
+});
+
+/** Moves an entry earlier (the toast's −5 and −15 min buttons). */
+export const moveEntryEarlier = safely(async (id: string, minutes: number) => {
+  const entry = data().entries.get(id);
+  if (!entry) return;
+  const newTime = entryTime(entry) - minutes * MINUTE_MS;
+  await changeEntry(id, { ts: new Date(newTime).toISOString() });
+  toast(`Moved to ${formatTime(newTime)}`, id);
+});
+
+/** Deletes an entry; message is the toast to show ("Removed" from Undo, "Deleted" from the log). */
+export const deleteEntry = safely(async (id: string, message: string) => {
+  await changeEntry(id, { deleted: true });
+  toast(message);
+});
+
+/** Saves the log's edit row: time is "HH:MM" on the entry's own day (empty to keep it), note may be empty. */
+export const editEntry = safely(async (id: string, time: string, note: string) => {
+  const entry = data().entries.get(id);
+  if (!entry) return;
+  const changes: Partial<Entry> = { note: note.trim() || null };
+  if (time) {
+    const [hours, minutes] = time.split(':').map(Number);
+    const when = new Date(entryTime(entry));
+    when.setHours(hours, minutes, 0, 0);
+    changes.ts = when.toISOString();
+  }
+  await changeEntry(id, changes);
+});
+
+/* ---------- check-in ---------- */
+
+/** A check-in answer: a rating level, a number as typed, the picked options, or text. */
+export type Answer = number | string | string[] | null;
+
+/**
+ * Saves every answered question as an entry, all sharing one checkin_id and timestamp.
+ * when is a datetime-local value ("" for now). Returns the check-in's time, or null if nothing was answered.
+ */
+export const saveCheckin = safely(async (answers: Record<string, Answer>, when: string): Promise<number | null> => {
+  const time = when ? new Date(when).getTime() : Date.now();
+  const fields = { ts: new Date(time).toISOString(), checkin_id: uuid() };
+
+  let answered = 0;
+  for (const tracker of sortedTrackers(data(), CHECKIN_TYPES)) {
+    const answer = answers[tracker.id];
+    if (answer == null || answer === '' || (Array.isArray(answer) && !answer.length)) continue;
+    const save = (values: Partial<Entry>) => saveEntry(newEntry(tracker.id, 'value', { ...fields, ...values }));
+    if (tracker.type === 'rating') {
+      const level = Number(answer);
+      await save({ num: level, txt: (tracker.config.levels || [])[level - 1] || null });
+    } else if (tracker.type === 'number') {
+      await save({ num: Number(answer) });
+    } else if (tracker.type === 'text') {
+      await save({ txt: String(answer) });
+    } else if (tracker.type === 'choice' && Array.isArray(answer)) {
+      for (const option of answer) await save({ txt: option }); // one entry per selected option
+    }
+    answered++;
+  }
+
+  if (!answered) {
+    toast('Nothing to save yet. Answer at least one question.');
+    return null;
+  }
+  toast(`Check-in saved · ${answered} ${answered === 1 ? 'answer' : 'answers'}`);
+  return time;
+});
+
+/* ---------- trackers ---------- */
+
+/** Saves a tracker from the editor. New trackers go to the end of the list. */
+export const saveTrackerEdit = safely(async (tracker: Tracker) => {
+  const isNew = !data().trackers.has(tracker.id);
+  const sort = isNew
+    ? Math.max(0, ...[...data().trackers.values()].map(t => t.sort || 0)) + 10
+    : tracker.sort;
+  await saveTracker({ ...tracker, sort });
+  toast(`Saved ${tracker.name}`);
+  return true;
+});
+
+export const archiveTracker = safely(async (id: string) => {
+  const tracker = trackerById(id);
+  await saveTracker({ ...tracker, archived: true });
+  toast(`Archived ${tracker.name}. Its entries are kept.`);
+  return true;
+});
+
+export const restoreTracker = safely(async (id: string) => {
+  await saveTracker({ ...trackerById(id), archived: false });
+});
+
+/** Swaps a tracker with its neighbor in the same group: direction -1 moves it up, 1 down. */
+export const moveTracker = safely(async (id: string, direction: -1 | 1) => {
+  const tracker = trackerById(id);
+  const sameGroup = sortedTrackers(data()).filter(t => groupName(t) === groupName(tracker));
+  const neighbor = sameGroup[sameGroup.findIndex(t => t.id === id) + direction];
+  if (!neighbor) return;
+  const mySort = tracker.sort;
+  const theirSort = neighbor.sort;
+  // With equal sort values a plain swap would change nothing, so step past the neighbor instead.
+  await saveTracker({ ...tracker, sort: theirSort === mySort ? theirSort + direction : theirSort });
+  await saveTracker({ ...neighbor, sort: mySort });
+});

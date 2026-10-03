@@ -1,0 +1,6 @@
+node_modules/
+dist/
+dev-dist/
+tests/screenshots/
+__pycache__/
+.DS_Store
