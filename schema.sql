@@ -100,8 +100,8 @@ grant select, insert, update, delete on public.entries  to authenticated;
 --   entries_readable   one row per entry, with readable columns and the episode it belongs to
 --   episodes_readable  one row per start/stop episode: start, end, duration, status, peak severity
 --   daily_summary      one row per day per tracker: averages, totals, episode minutes, counts
--- Dates and times are local to this time zone. If you live elsewhere, change it here and run the file again
--- (names are listed at https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+-- Dates and times are local to this time zone. The app's "Copy setup SQL" fills in the phone's own; to change it
+-- by hand, edit it here and run the file again (names: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
 create or replace function public.logbook_timezone()
 returns text language sql immutable as $$ select 'America/New_York' $$;

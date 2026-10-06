@@ -3,6 +3,7 @@ import { useSyncState } from '../../hooks';
 import { dayKey, dayLabel, formatTime, prefs } from '../../lib/util';
 import { sync, type SyncState } from '../../lib/sync';
 import { safely, toast } from '../../lib/toast';
+import schemaSql from '../../../schema.sql?raw';
 
 export function SyncPanel() {
   const state = useSyncState();
@@ -69,52 +70,65 @@ function LinkChoice() {
 }
 
 function SignInForm({ state, projectUrl }: { state: SyncState; projectUrl: string }) {
-  // Once a code has been sent, the address is remembered (even across restarts) and the code field appears.
+  // Once a sign-in email has been sent, the address is remembered (even across restarts) and the link field appears.
   const [codeSentTo, setCodeSentTo] = useState(() => prefs.get<string>('pendingEmail'));
+  const [useEmail, setUseEmail] = useState(!!codeSentTo);
   const [email, setEmail] = useState(codeSentTo || '');
+  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState<'send' | 'verify' | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const rememberCodeSentTo = (address: string | null) => {
     prefs.set('pendingEmail', address);
     setCodeSentTo(address);
   };
 
-  const sendCode = async () => {
-    const address = email.trim();
-    if (!/^\S+@\S+\.\S+$/.test(address)) {
-      setError('Enter your email address.');
-      return;
-    }
-    setBusy('send');
+  /** Runs a sign-in step, showing its error under the form. */
+  const attempt = async (step: () => Promise<void>) => {
+    setBusy(true);
     try {
-      await sync.sendCode(address);
-      rememberCodeSentTo(address);
+      await step();
       setError('');
-      toast('Code sent. Check your email.');
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
-  const verify = async () => {
-    if (!code.trim()) {
-      setError('Enter the code from the email.');
-      return;
-    }
-    setBusy('verify');
-    try {
+  const validEmail = () => {
+    if (/^\S+@\S+\.\S+$/.test(email.trim())) return true;
+    setError('Enter your email address.');
+    return false;
+  };
+
+  const signIn = () => {
+    if (!validEmail()) return;
+    if (!password) return setError('Enter your password.');
+    attempt(async () => {
+      await sync.signIn(email, password);
+      rememberCodeSentTo(null);
+      toast('Signed in');
+    });
+  };
+
+  const sendCode = () => {
+    if (!validEmail()) return;
+    attempt(async () => {
+      await sync.sendCode(email);
+      rememberCodeSentTo(email.trim());
+      toast('Sent. Check your email.');
+    });
+  };
+
+  const verify = () => {
+    if (!code.trim()) return setError('Paste the link from the email, or type its code.');
+    attempt(async () => {
       await sync.verify(codeSentTo!, code);
       rememberCodeSentTo(null);
       toast('Signed in');
-      // Signed in now, so this form is replaced; no state to reset.
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(null);
-    }
+    });
   };
 
   const disconnect = safely(async () => {
@@ -125,32 +139,59 @@ function SignInForm({ state, projectUrl }: { state: SyncState; projectUrl: strin
   return (
     <>
       <p className="small">
-        Connected to <span className="mono">{projectUrl.replace(/^https:\/\//, '')}</span>. Sign in with the email on your Supabase account. You'll get a code by email.
+        Connected to <span className="mono">{projectUrl.replace(/^https:\/\//, '')}</span>. Sign in with the email and password of your user in Supabase.
       </p>
       {state.detail && <p className="small error-text">{state.detail}</p>}
       <label className="field">
         Email
         <input id="sign-in-email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
       </label>
-      {codeSentTo && (
+      {useEmail ? (
+        codeSentTo && (
+          <>
+            <label className="field">
+              Link or code from the email
+              <input id="sign-in-code" autoComplete="one-time-code" autoCapitalize="off" spellCheck={false}
+                value={code} onChange={e => setCode(e.target.value)} />
+            </label>
+            <p className="small muted">
+              Press and hold the link in the email, tap <b>Copy</b>, and paste it here. Don't open it: that uses it up.
+            </p>
+          </>
+        )
+      ) : (
         <label className="field">
-          Code from the email
-          <input id="sign-in-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10}
-            value={code} onChange={e => setCode(e.target.value)} />
+          Password
+          <input id="sign-in-password" type="password" autoComplete="current-password" value={password}
+            onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && signIn()} />
         </label>
       )}
       <p className="small error-text" id="sign-in-error">{error}</p>
       <div className="button-row">
-        {codeSentTo ? (
+        {!useEmail && (
           <>
-            <button type="button" className="button primary" id="sign-in" disabled={busy === 'verify'} onClick={verify}>Sign in</button>
-            <button type="button" className="button" id="send-code" disabled={busy === 'send'} onClick={sendCode}>Send a new code</button>
+            <button type="button" className="button primary" id="sign-in" disabled={busy} onClick={signIn}>Sign in</button>
+            <button type="button" className="button" id="use-email-link" onClick={() => { setUseEmail(true); setError(''); }}>
+              Email me a link instead
+            </button>
           </>
-        ) : (
-          <button type="button" className="button primary" id="send-code" disabled={busy === 'send'} onClick={sendCode}>Email me a code</button>
+        )}
+        {useEmail && codeSentTo && (
+          <button type="button" className="button primary" id="sign-in-with-link" disabled={busy} onClick={verify}>Sign in</button>
+        )}
+        {useEmail && (
+          <>
+            <button type="button" className={codeSentTo ? 'button' : 'button primary'} id="send-code" disabled={busy} onClick={sendCode}>
+              {codeSentTo ? 'Send a new email' : 'Email me a sign-in link'}
+            </button>
+            <button type="button" className="button" id="use-password" onClick={() => { setUseEmail(false); setError(''); }}>
+              Use my password
+            </button>
+          </>
         )}
         <button type="button" className="button danger" id="project-disconnect" onClick={disconnect}>Disconnect project</button>
       </div>
+      {useEmail && <p className="small muted">Supabase sends only a couple of sign-in emails an hour.</p>}
     </>
   );
 }
@@ -168,10 +209,48 @@ function SignedIn({ state }: { state: SyncState }) {
     <>
       <p className="small">Signed in as <b>{state.email || 'you'}</b>. {lastSyncText(state.lastSync)}</p>
       {state.status === 'error' && <p className="small error-text">{state.detail}</p>}
+      {state.status === 'needsSchema' && <SchemaSetup projectUrl={state.projectUrl!} />}
       <div className="button-row">
         <button type="button" className="button primary" id="sync-now" onClick={() => sync.run()}>Sync now</button>
         <button type="button" className="button" id="sign-out" onClick={safely(sync.signOut)}>Sign out</button>
       </div>
     </>
+  );
+}
+
+/** schema.sql, with the analysis views set to this device's time zone. */
+function setupSql(): string {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (!/^[\w+\-/]+$/.test(zone)) return schemaSql;
+  return schemaSql.replace(/(function public\.logbook_timezone\(\)[^$]*\$\$ select ')[^']*/, '$1' + zone);
+}
+
+/** The SQL Editor for a project hosted by Supabase, or null for any other address (such as a local one). */
+function sqlEditorUrl(projectUrl: string): string | null {
+  const ref = /^https:\/\/([a-z0-9]+)\.supabase\.co$/.exec(projectUrl)?.[1];
+  return ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : null;
+}
+
+const copySetupSql = safely(async () => {
+  await navigator.clipboard.writeText(setupSql());
+  toast('Setup SQL copied');
+});
+
+/** Shown when the project doesn't have Logbook's tables yet, or has an older version of them. */
+function SchemaSetup({ projectUrl }: { projectUrl: string }) {
+  const editorUrl = sqlEditorUrl(projectUrl);
+  return (
+    <div className="notice stack">
+      <p><b>Your Supabase project needs Logbook's tables.</b> This happens once when you set it up, and again when an app update changes them.</p>
+      <p className="small">
+        Copy the setup SQL, paste it into a new query in the Supabase SQL Editor, and click <b>Run</b>. Then tap <b>Sync now</b>.
+      </p>
+      <div className="button-row">
+        <button type="button" className="button primary" id="schema-copy" onClick={copySetupSql}>Copy setup SQL</button>
+        {editorUrl && (
+          <a className="button" id="schema-editor" href={editorUrl} target="_blank" rel="noreferrer">Open SQL Editor</a>
+        )}
+      </div>
+    </div>
   );
 }

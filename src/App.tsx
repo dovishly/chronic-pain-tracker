@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { dayKey } from './lib/util';
 import { TabBar, VIEW_TITLES, type View } from './components/TabBar';
 import { SyncPill } from './components/SyncPill';
+import { StorageHelp } from './components/StorageHelp';
 import { Toast } from './components/Toast';
 import { TodayView } from './views/today/TodayView';
 import { CheckinView, emptyCheckin, type CheckinDraft } from './views/CheckinView';
@@ -29,7 +30,10 @@ export function App() {
       <main className="page">
         <div className="page-header">
           <h1>{VIEW_TITLES[view]}</h1>
-          <SyncPill onClick={() => setView('settings')} />
+          <div className="header-actions">
+            <SyncPill onClick={() => selectTab('settings')} />
+            <StorageHelp onOpenSettings={() => selectTab('settings')} />
+          </div>
         </div>
         {view === 'today' && <TodayView shownDay={shownDay} onShowDay={setShownDay} />}
         {view === 'checkin' && <CheckinView draft={checkin} onChange={setCheckin} onSaved={showSavedCheckin} />}

@@ -32,7 +32,8 @@ APP_URL = 'http://127.0.0.1:8765/index.html'
 SUPABASE_URL = 'https://mock.supabase.co'
 ANON_KEY = 'anon-key-0123456789abcdefghij'
 EMAIL = 'me@example.com'   # the only account in the fake Supabase
-CODE = '123456'            # the sign-in code it always accepts
+PASSWORD = 'correct horse battery staple'  # the account's password
+CODE = '123456'            # the sign-in code it always accepts; each email also has a one-time link
 ACCOUNT_TRACKERS = 16      # the 15 starter trackers plus Stiffness, added on the first phone
 TRICKY_NAME = '<b>Bold</b> & "Q"'  # must be shown as typed, never turned into HTML
 
@@ -46,6 +47,8 @@ class FakeSupabase:
         self.tables = {'trackers': {}, 'entries': {}}
         self.schema_version = 1  # 0 acts like a schema.sql from before versions (the function is missing)
         self.users = {EMAIL: 'u1'}
+        self.links = {}           # token in an emailed sign-in link -> email address
+        self.last_link = None     # the link in the latest email
         self.tokens = {}          # access token -> user id
         self.refresh_tokens = {}  # refresh token -> user id
         self.clock = 0
@@ -85,10 +88,22 @@ class FakeSupabase:
         if path == '/auth/v1/otp':
             if body['email'] not in self.users:
                 return 422, {'code': 422, 'error_code': 'otp_disabled', 'msg': 'Signups not allowed for otp'}
+            # The email Supabase sends a new free project: a link, built the way Supabase builds it.
+            token_hash = uuid.uuid4().hex
+            self.links[token_hash] = body['email']
+            self.last_link = f'{SUPABASE_URL}/auth/v1/verify?token={token_hash}&type=magiclink&redirect_to=https%3A%2F%2Fexample.github.io%2F'
             return 200, {}
         if path == '/auth/v1/verify':
-            if body.get('token') != CODE:
+            if 'token_hash' in body:  # from a link, which works once
+                email = self.links.pop(body['token_hash'], None) if body.get('type') == 'email' else None
+            else:
+                email = body.get('email') if body.get('token') == CODE else None
+            if not email:
                 return 403, {'msg': 'Token has expired or is invalid'}
+            return 200, self.new_session(self.users[email], email)
+        if path == '/auth/v1/token' and query.get('grant_type') == ['password']:
+            if body.get('email') not in self.users or body.get('password') != PASSWORD:
+                return 400, {'error_code': 'invalid_credentials', 'msg': 'Invalid login credentials'}
             return 200, self.new_session(self.users[body['email']], body['email'])
         if path == '/auth/v1/token' and query.get('grant_type') == ['refresh_token']:
             user_id = self.refresh_tokens.pop(body.get('refresh_token'), None)
@@ -162,13 +177,23 @@ class Phone:
         self.page.fill('#project-key', key)
         self.page.click('#project-connect')
 
+    def sign_in(self, password=PASSWORD, email=EMAIL):
+        if self.locator('#use-password').count():
+            self.page.click('#use-password')
+        self.page.fill('#sign-in-email', email)
+        self.page.fill('#sign-in-password', password)
+        self.page.click('#sign-in')
+
     def request_code(self, email=EMAIL):
+        """Asks for a sign-in email, the fallback for a forgotten password."""
+        if self.locator('#use-email-link').count():
+            self.page.click('#use-email-link')
         self.page.fill('#sign-in-email', email)
         self.page.click('#send-code')
 
-    def enter_code(self, code=CODE):
-        self.page.fill('#sign-in-code', code)
-        self.page.click('#sign-in')
+    def enter_code(self, code_or_link=CODE):
+        self.page.fill('#sign-in-code', code_or_link)
+        self.page.click('#sign-in-with-link')
 
     def wait_for(self, condition, timeout_s=5):
         """Waits until condition() is true or time runs out; the test then asserts it.
@@ -288,7 +313,7 @@ def phone1(browser, supabase):
 
 @pytest.fixture(scope='module')
 def phone2(browser, supabase):
-    return Phone(browser, supabase, color_scheme='dark')
+    return Phone(browser, supabase, color_scheme='dark', timezone='Europe/Berlin')
 
 
 @pytest.fixture(scope='module')
@@ -308,6 +333,24 @@ def test_fresh_phone_has_the_starter_trackers(phone1):
     expect(phone1.locator('#sync-pill')).to_have_text('On this device only')
     assert phone1.locator('[data-episode]').count() >= 5
     expect(phone1.locator('[data-episode]', has_text='Headache')).to_have_count(1)
+
+
+def test_help_explains_where_data_is_kept(phone1):
+    help_dialog = phone1.locator('#storage-help-dialog')
+    phone1.page.click('#storage-help')
+    expect(help_dialog).to_be_visible()
+    expect(help_dialog).to_contain_text("At the moment, it's only on this phone")
+    expect(help_dialog).to_contain_text('Free projects are paused after about a week')
+    expect(phone1.locator('#storage-help-title')).to_be_focused()  # so it opens at the top, not at the buttons
+    phone1.screenshot('help-light')
+    phone1.page.click('#storage-help-close')
+    expect(help_dialog).to_be_hidden()
+
+    phone1.page.click('#storage-help')
+    phone1.page.click('#storage-help-sync')
+    expect(help_dialog).to_be_hidden()
+    expect(phone1.locator('h1')).to_have_text('Settings')
+    phone1.go_to('Today')
 
 
 def test_start_and_stop_episodes(phone1):
@@ -459,8 +502,13 @@ def test_http_project_on_this_computer_accepted(phone1):
     phone1.page.click('#project-disconnect')
 
 
-def test_sign_in_refuses_unknown_email(phone1):
+def test_sign_in_refuses_wrong_password(phone1):
     phone1.connect()
+    phone1.sign_in('not my password')
+    expect(phone1.locator('#sign-in-error')).to_contain_text("don't match a user in this project")
+
+
+def test_sign_in_refuses_unknown_email(phone1):
     phone1.request_code('stranger@example.com')
     expect(phone1.locator('#sign-in-error')).to_contain_text("isn't a user in this project")
 
@@ -471,8 +519,13 @@ def test_sign_in_refuses_wrong_code(phone1):
     expect(phone1.locator('#sign-in-error')).to_contain_text("didn't work")
 
 
+def test_sign_in_refuses_wrong_link(phone1):
+    phone1.enter_code(f'{SUPABASE_URL}/auth/v1/verify?token=not-a-real-token&type=magiclink')
+    expect(phone1.locator('#sign-in-error')).to_contain_text("didn't work")
+
+
 def test_signing_in_uploads_everything(phone1, supabase, phone1_export):
-    phone1.enter_code()
+    phone1.sign_in()
     expect(phone1.locator('#sync-pill')).to_contain_text('Synced')
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS
     # Every exported entry, plus the undone coffee: deletes sync as deleted = true.
@@ -517,9 +570,19 @@ def test_outdated_database_stops_sync(phone2, supabase):
     phone2.request_code()
     supabase.schema_version = 0  # the owner hasn't run the latest schema.sql yet
     phone2.enter_code()
-    expect(phone2.locator('#sync-pill')).to_contain_text('Sync problem')
-    expect(phone2.locator('#sync-panel')).to_contain_text('Your Supabase database needs an update')
+    expect(phone2.locator('#sync-pill')).to_contain_text('Action needed')
+    expect(phone2.locator('#sync-panel')).to_contain_text("Your Supabase project needs Logbook's tables")
     expect(phone2.locator('#trackers')).not_to_contain_text('Drowsy')
+
+
+def test_setup_sql_can_be_copied_into_the_sql_editor(phone2):
+    expect(phone2.locator('#schema-editor')).to_have_attribute('href', 'https://supabase.com/dashboard/project/mock/sql/new')
+    phone2.context.grant_permissions(['clipboard-read', 'clipboard-write'])
+    phone2.page.click('#schema-copy')
+    expect(phone2.locator('.toast')).to_contain_text('Setup SQL copied')
+    sql = phone2.page.evaluate('navigator.clipboard.readText()')
+    assert 'create table if not exists public.trackers' in sql
+    assert "$$ select 'Europe/Berlin' $$" in sql  # the views use this phone's time zone
 
 
 def test_fresh_phone_takes_the_accounts_trackers(phone2, supabase):
@@ -572,7 +635,7 @@ def test_joining_asks_before_replacing_this_phones_data(phone3, supabase):
     phone3.go_to('Settings')
     phone3.connect()
     phone3.request_code()
-    phone3.enter_code()
+    phone3.enter_code(supabase.last_link)  # pasted from the email instead of a code
     expect(phone3.locator('#sync-panel')).to_contain_text('Your account already has data')
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS  # nothing uploaded yet
 

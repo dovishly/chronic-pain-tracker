@@ -4,7 +4,7 @@ import { db } from './db';
 import { trackers, entries, pendingKeys, dataChanged } from './data';
 import { normalizeEntry, normalizeTracker, type Entry, type Tracker } from './model';
 
-export type SyncStatus = 'local' | 'signedout' | 'syncing' | 'offline' | 'ok' | 'error' | 'needsChoice';
+export type SyncStatus = 'local' | 'signedout' | 'syncing' | 'offline' | 'ok' | 'error' | 'needsChoice' | 'needsSchema';
 
 /** Everything the UI shows about sync. A new object whenever any of it changes. */
 export interface SyncState {
@@ -31,8 +31,6 @@ const AUTH_PREF = 'auth'; // the pref supabase-js keeps the session in
 
 /** The lowest logbook_schema_version() this app syncs with. Raise it with the one in schema.sql. */
 const SCHEMA_VERSION = 1;
-const OUTDATED_SCHEMA_MESSAGE =
-  'Your Supabase database needs an update. Run the latest schema.sql in the Supabase SQL Editor (see the setup guide), then tap Sync now.';
 
 let project = prefs.get<Project>('project');
 let client: SupabaseClient | null = null;
@@ -250,8 +248,8 @@ async function run(): Promise<void> {
     if (error instanceof WaitingForChoice) {
       // Keep the needsChoice status until the owner answers.
     } else if (error instanceof OutdatedSchema) {
-      status = 'error';
-      statusDetail = OUTDATED_SCHEMA_MESSAGE;
+      status = 'needsSchema'; // Settings shows how to run schema.sql
+      statusDetail = '';
     } else if (!navigator.onLine || isNetworkFailure(error)) {
       status = 'offline';
       statusDetail = '';
@@ -302,6 +300,26 @@ function checkProjectUrl(url: string): void {
   if (location.protocol === 'https:') {
     throw new Error('This copy of the app can only connect to https:// projects. To use a local Supabase, run the app with npm run dev.');
   }
+}
+
+/**
+ * The token in a sign-in link from the email, or null if the text isn't one. New free projects can't change
+ * the email to show a code, and opening the link would sign in Safari rather than the Home Screen app.
+ */
+function linkToken(text: string): string | null {
+  try {
+    const params = new URL(text).searchParams;
+    return params.get('token_hash') || params.get('token');
+  } catch {
+    return null;
+  }
+}
+
+/** The first sync after signing in links this device to the account; see linkAccount. */
+async function startAfterSignIn(): Promise<void> {
+  await db.setMeta('needsLink', true);
+  setStatus('syncing');
+  run();
 }
 
 /** Error codes Supabase Auth sends when asked for a code for an email that isn't a user (sign-ups are off). */
@@ -358,6 +376,16 @@ export const sync = {
     await resetCursors();
   },
 
+  async signIn(email: string, password: string): Promise<void> {
+    const { error } = await supabase().auth.signInWithPassword({ email: email.trim(), password });
+    if (error) {
+      throw new Error(error.code === 'invalid_credentials' || /invalid login/i.test(error.message)
+        ? "That email and password don't match a user in this project."
+        : error.message);
+    }
+    await startAfterSignIn();
+  },
+
   async sendCode(email: string): Promise<void> {
     const { error } = await supabase().auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false } });
     if (!error) return;
@@ -367,14 +395,18 @@ export const sync = {
       : error.message);
   },
 
-  async verify(email: string, code: string): Promise<void> {
-    const { error } = await supabase().auth.verifyOtp({ type: 'email', email: email.trim(), token: code.trim() });
+  /** Signs in with the code from the email, or with its sign-in link pasted rather than opened. */
+  async verify(email: string, codeOrLink: string): Promise<void> {
+    const tokenHash = linkToken(codeOrLink.trim());
+    const { error } = tokenHash
+      ? await supabase().auth.verifyOtp({ type: 'email', token_hash: tokenHash })
+      : await supabase().auth.verifyOtp({ type: 'email', email: email.trim(), token: codeOrLink.trim() });
     if (error) {
-      throw new Error(/expired|invalid/i.test(error.message) ? "That code didn't work or has expired. Send a new one." : error.message);
+      throw new Error(/expired|invalid/i.test(error.message)
+        ? "That link or code didn't work or has expired. Send a new email."
+        : error.message);
     }
-    await db.setMeta('needsLink', true);
-    setStatus('syncing');
-    run();
+    await startAfterSignIn();
   },
 
   /** The owner's answer to needsChoice: replace this device's data, or back out and sign out. */

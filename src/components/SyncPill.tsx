@@ -10,7 +10,8 @@ function pillContent({ status, waiting, lastSync }: SyncState): [string, string]
     case 'syncing': return ['Syncing…', ''];
     case 'offline': return [waiting ? `Offline · ${waiting} waiting` : 'Offline', 'warn'];
     case 'error': return ['Sync problem', 'err'];
-    case 'needsChoice': return ['Action needed', 'err'];
+    case 'needsChoice':
+    case 'needsSchema': return ['Action needed', 'err'];
   }
   if (waiting) return [`${waiting} waiting`, 'warn'];
   return [lastSync ? `Synced ${formatTime(lastSync)}` : 'Synced', 'ok'];
