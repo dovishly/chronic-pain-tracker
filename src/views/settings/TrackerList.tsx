@@ -1,7 +1,7 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { useData } from '../../hooks';
 import { TYPE_LABELS, groupTrackers, sortedTrackers, type Tracker } from '../../lib/model';
-import { moveTracker, restoreTracker } from '../../lib/actions';
+import { deleteTracker, moveTracker, restoreTracker } from '../../lib/actions';
 import { colorStyle } from '../../components/style';
 
 function TrackerRow({ tracker, children }: { tracker: Tracker; children: ReactNode }) {
@@ -46,8 +46,10 @@ export function TrackerList({ onEdit }: { onEdit: (trackerId: string) => void })
   );
 }
 
+/** Archived trackers, to restore or delete. Delete takes a second tap. */
 export function ArchivedTrackers() {
   const archived = sortedTrackers(useData(), null, { includeArchived: true }).filter(t => t.archived);
+  const [confirming, setConfirming] = useState<string | null>(null);
   if (!archived.length) return null;
   return (
     <details className="archived-trackers" id="archived-trackers">
@@ -58,6 +60,11 @@ export function ArchivedTrackers() {
             <TrackerRow key={tracker.id} tracker={tracker}>
               <button type="button" data-restore-tracker={tracker.id} onClick={() => restoreTracker(tracker.id)}>
                 Restore
+              </button>
+              <button type="button" className={confirming === tracker.id ? 'is-confirming' : undefined}
+                data-delete-tracker={tracker.id}
+                onClick={() => (confirming === tracker.id ? deleteTracker(tracker.id) : setConfirming(tracker.id))}>
+                {confirming === tracker.id ? 'Delete for good?' : 'Delete'}
               </button>
             </TrackerRow>
           ))}

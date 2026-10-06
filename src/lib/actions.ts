@@ -4,7 +4,8 @@ import {
   CHECKIN_TYPES, newEntry, entryTime, sortedTrackers, groupName, levelLabel, activeEpisodes,
   type Entry, type EntryKind, type Tracker,
 } from './model';
-import { saveEntry, saveTracker } from './store';
+import { addStarterTrackers, eraseDevice, saveEntries, saveEntry, saveTracker } from './store';
+import { sync } from './sync';
 import { toast, safely } from './toast';
 
 const data = () => dataStore.get();
@@ -146,6 +147,16 @@ export const archiveTracker = safely(async (id: string) => {
   return true;
 });
 
+/** Deletes a tracker and all its entries, here and on every device it syncs to. */
+export const deleteTracker = safely(async (id: string) => {
+  const tracker = trackerById(id);
+  await saveTracker({ ...tracker, deleted: true });
+  const itsEntries = [...data().entries.values()].filter(e => e.tracker_id === id && !e.deleted);
+  await saveEntries(itsEntries.map(e => ({ ...e, deleted: true })));
+  toast(`Deleted ${tracker.name}`);
+  return true;
+});
+
 export const restoreTracker = safely(async (id: string) => {
   await saveTracker({ ...trackerById(id), archived: false });
 });
@@ -161,4 +172,25 @@ export const moveTracker = safely(async (id: string, direction: -1 | 1) => {
   // With equal sort orders a plain swap would change nothing, so step past the neighbor instead.
   await saveTracker({ ...tracker, sort_order: theirs === mine ? theirs + direction : theirs });
   await saveTracker({ ...neighbor, sort_order: mine });
+});
+
+/* ---------- starting over ---------- */
+
+/** Erases this phone's data and connection, then reopens with the starter trackers. Supabase is left as it is. */
+export const resetDevice = safely(async () => {
+  await sync.disconnect();
+  await eraseDevice();
+  location.reload();
+});
+
+/** Deletes everything in the account and on this phone, and starts again with the starter trackers. */
+export const resetEverywhere = safely(async () => {
+  await sync.deleteAccountData();
+  for (const tracker of [...data().trackers.values()].filter(t => !t.deleted)) {
+    await saveTracker({ ...tracker, deleted: true });
+  }
+  await saveEntries([...data().entries.values()].filter(e => !e.deleted).map(e => ({ ...e, deleted: true })));
+  await addStarterTrackers();
+  toast('Everything was reset. Your other phones catch up when they next sync.');
+  return true;
 });

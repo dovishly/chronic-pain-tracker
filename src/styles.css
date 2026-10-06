@@ -979,6 +979,11 @@ textarea {
   font-weight: 700;
 }
 
+.tracker-actions button.is-confirming {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .archived-trackers {
   margin-top: 10px;
 }

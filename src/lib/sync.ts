@@ -30,7 +30,7 @@ const SYNC_DELAY_AFTER_WRITE_MS = 700; // lets a burst of taps go up in one requ
 const AUTH_PREF = 'auth'; // the pref supabase-js keeps the session in
 
 /** The lowest logbook_schema_version() this app syncs with. Raise it with the one in schema.sql. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 let project = prefs.get<Project>('project');
 let client: SupabaseClient | null = null;
@@ -354,6 +354,18 @@ export const sync = {
     prefs.set('project', project);
     openClient();
     setStatus('signedout');
+  },
+
+  /** Marks every tracker and entry in the account deleted, including ones this phone hasn't downloaded yet. */
+  async deleteAccountData(): Promise<void> {
+    if (!session) throw new Error('Sign in first.');
+    try {
+      await check(supabase().from('entries').update({ deleted: true }).eq('deleted', false));
+      await check(supabase().from('trackers').update({ deleted: true }).eq('deleted', false));
+    } catch (error) {
+      if (!navigator.onLine || isNetworkFailure(error)) throw new Error('Resetting everywhere needs a connection. Nothing was changed.');
+      throw error;
+    }
   },
 
   /** Forgets the project. Signs out on the server if it can; offline, the session is forgotten here anyway. */

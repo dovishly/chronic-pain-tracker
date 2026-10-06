@@ -27,6 +27,7 @@ export interface Tracker {
   config: TrackerConfig;
   sort_order: number;
   archived: boolean;
+  deleted: boolean;       // soft delete, so deletions sync; its entries are deleted with it
   updated_at?: string;    // set on every local write; replaced by the server's on sync
 }
 
@@ -124,7 +125,7 @@ export const STARTER_TRACKERS: StarterTracker[] = [
 /** Fills in defaults for a tracker from IndexedDB or Supabase: older rows may lack newer fields. */
 export function normalizeTracker(raw: Record<string, unknown>): Tracker {
   const { user_id: _user, created_at: _created, ...tracker } = raw; // server-only columns
-  return { ...tracker, config: tracker.config || {} } as Tracker;
+  return { ...tracker, config: tracker.config || {}, deleted: !!tracker.deleted } as Tracker;
 }
 
 export function normalizeEntry(raw: Record<string, unknown>): Entry {
@@ -166,9 +167,9 @@ export function entryTime(entry: Entry): number {
 
 export const byTime = (a: Entry, b: Entry) => entryTime(a) - entryTime(b);
 
-/** Entries that aren't deleted and whose tracker still exists. */
+/** Entries that aren't deleted and whose tracker exists and isn't deleted. */
 export const liveEntries = (data: Data) =>
-  [...data.entries.values()].filter(e => !e.deleted && data.trackers.has(e.tracker_id));
+  [...data.entries.values()].filter(e => !e.deleted && data.trackers.get(e.tracker_id)?.deleted === false);
 
 /** Every day that has entries, plus today, oldest first. */
 export function daysWithEntries(data: Data): string[] {
@@ -207,7 +208,7 @@ export function sortedTrackers(
 ): Tracker[] {
   const wanted = types == null ? null : ([] as TrackerType[]).concat(types);
   return [...data.trackers.values()]
-    .filter(t => (!wanted || wanted.includes(t.type)) && (includeArchived || !t.archived))
+    .filter(t => !t.deleted && (!wanted || wanted.includes(t.type)) && (includeArchived || !t.archived))
     .sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
 }
 
@@ -275,7 +276,7 @@ export function activeEpisodes(data: Data): Record<string, ActiveEpisode> {
   }
   for (const id of Object.keys(active)) {
     const tracker = data.trackers.get(id);
-    if (!tracker || tracker.archived) delete active[id];
+    if (!tracker || tracker.archived || tracker.deleted) delete active[id];
   }
   return active;
 }

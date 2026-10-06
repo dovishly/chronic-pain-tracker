@@ -263,6 +263,19 @@ def test_daily_summary_leaves_out_deleted(daily):
     assert ('2026-09-02', 'Coffee') not in daily  # the only coffee that day was deleted
 
 
+def test_views_leave_out_deleted_trackers(cur):
+    # Coffee's entries aren't marked deleted, as when a phone logged one before hearing of the deletion.
+    with signed_in_as(cur, USER_1):
+        cur.execute("update public.trackers set deleted = true where name = 'Coffee'")
+        try:
+            for view in ANALYSIS_VIEWS:
+                assert 'Coffee' not in {row['tracker'] for row in rows(cur, f'select tracker from public.{view}')}, view
+            timeline = rows(cur, 'select timeline from public.episodes_readable where episode_id = %s', (HEADACHE_SEP1,))
+            assert 'Coffee' not in timeline[0]['timeline']
+        finally:
+            cur.execute("update public.trackers set deleted = false where name = 'Coffee'")
+
+
 # ---------- row-level security ----------
 
 def test_other_user_sees_nothing(cur):

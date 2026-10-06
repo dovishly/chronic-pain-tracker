@@ -1,5 +1,5 @@
 // Writes go to memory and IndexedDB, then the outbox for the next sync. Never to the network directly.
-import { nowIso, uuid } from './util';
+import { nowIso, prefs, uuid } from './util';
 import { db } from './db';
 import { trackers, entries, pendingKeys, dataChanged } from './data';
 import { STARTER_TRACKERS, normalizeEntry, normalizeTracker, type Entry, type Tracker } from './model';
@@ -9,7 +9,7 @@ import { sync, type OutboxItem } from './sync';
 function trackerRow(t: Tracker) {
   return {
     id: t.id, name: t.name, type: t.type, group_name: t.group_name ?? null, color: t.color,
-    config: t.config || {}, sort_order: t.sort_order || 0, archived: !!t.archived,
+    config: t.config || {}, sort_order: t.sort_order || 0, archived: !!t.archived, deleted: !!t.deleted,
   };
 }
 
@@ -28,11 +28,20 @@ async function queueForSync(item: OutboxItem): Promise<void> {
 
 /** Saves an entry. Entries are never changed in place: pass a new object for an edit. */
 export async function saveEntry(entry: Entry): Promise<void> {
-  const saved = { ...entry, updated_at: nowIso() };
-  entries.set(saved.id, saved);
+  await saveEntries([entry]);
+}
+
+/** Saves several entries with one write to IndexedDB and one to the outbox. */
+export async function saveEntries(changed: Entry[]): Promise<void> {
+  const updatedAt = nowIso();
+  const saved = changed.map(entry => ({ ...entry, updated_at: updatedAt }));
+  for (const entry of saved) entries.set(entry.id, entry);
   dataChanged();
-  await db.put('entries', saved);
-  await queueForSync({ key: 'entries:' + saved.id, table: 'entries', updatedAt: saved.updated_at, row: entryRow(saved) });
+  await db.putMany('entries', saved);
+  const items: OutboxItem[] = saved.map(e => ({ key: 'entries:' + e.id, table: 'entries', updatedAt, row: entryRow(e) }));
+  for (const item of items) pendingKeys.add(item.key);
+  await db.putMany('outbox', items);
+  sync.syncSoon();
 }
 
 export async function saveTracker(tracker: Tracker): Promise<void> {
@@ -63,11 +72,19 @@ export async function loadFromDevice(): Promise<void> {
 
   // Skip the starter set if this device is about to link to an account, which has its own trackers.
   if (!savedTrackers.length && !(await db.getMeta<boolean>('seeded'))) {
-    if (!sync.get().projectUrl) {
-      for (const [i, starter] of STARTER_TRACKERS.entries()) {
-        await saveTracker({ id: uuid(), ...starter, sort_order: i * 10, archived: false });
-      }
-    }
+    if (!sync.get().projectUrl) await addStarterTrackers();
     await db.setMeta('seeded', true);
   }
+}
+
+export async function addStarterTrackers(): Promise<void> {
+  for (const [i, starter] of STARTER_TRACKERS.entries()) {
+    await saveTracker({ id: uuid(), ...starter, sort_order: i * 10, archived: false, deleted: false });
+  }
+}
+
+/** Erases everything Logbook keeps on this device: trackers, entries, the outbox and all settings. */
+export async function eraseDevice(): Promise<void> {
+  for (const store of ['trackers', 'entries', 'outbox', 'meta'] as const) await db.clear(store);
+  prefs.clearAll();
 }

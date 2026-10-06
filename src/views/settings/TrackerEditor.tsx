@@ -4,7 +4,7 @@ import {
   COLORS, TYPE_HELP, TYPE_LABELS, defaultConfig, liveEntries, sortedTrackers, trackerProblem,
   type Tracker, type TrackerConfig, type TrackerType,
 } from '../../lib/model';
-import { archiveTracker, saveTrackerEdit } from '../../lib/actions';
+import { archiveTracker, deleteTracker, saveTrackerEdit } from '../../lib/actions';
 import { unhandled } from '../../lib/util';
 import { colorStyle } from '../../components/style';
 
@@ -75,6 +75,7 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
   const [baseConfig, setBaseConfig] = useState(tracker.config);
   const [fields, setFields] = useState(() => configFields(tracker.config));
   const [error, setError] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -82,7 +83,8 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
   }, [isNew]);
 
   // A tracker's type is fixed once it has entries, since they were recorded in that type's shape.
-  const typeLocked = !isNew && liveEntries(data).some(e => e.tracker_id === tracker.id);
+  const entryCount = isNew ? 0 : liveEntries(data).filter(e => e.tracker_id === tracker.id).length;
+  const typeLocked = entryCount > 0;
   const existingGroups = [...new Set(sortedTrackers(data, null, { includeArchived: true })
     .map(t => t.group_name).filter((g): g is string => !!g))];
   const setField: SetField = (key, value) => setFields(f => ({ ...f, [key]: value }));
@@ -113,6 +115,10 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
 
   const archive = async () => {
     if (await archiveTracker(tracker.id)) onClose();
+  };
+
+  const remove = async () => {
+    if (await deleteTracker(tracker.id)) onClose();
   };
 
   return (
@@ -169,8 +175,25 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
       <div className="button-row">
         <button type="button" className="button primary" id="editor-save" onClick={save}>Save</button>
         <button type="button" className="button" id="editor-cancel" onClick={onClose}>Cancel</button>
-        {!isNew && <button type="button" className="button danger" id="editor-archive" onClick={archive}>Archive</button>}
+        {!isNew && <button type="button" className="button" id="editor-archive" onClick={archive}>Archive</button>}
+        {!isNew && (
+          <button type="button" className="button danger" id="editor-delete" onClick={() => setConfirmingDelete(true)}>Delete</button>
+        )}
       </div>
+      {confirmingDelete && (
+        <div className="notice stack">
+          <p>
+            <b>Delete {tracker.name} for good?</b>{' '}
+            {entryCount > 0 && `Its ${entryCount} ${entryCount === 1 ? 'entry goes' : 'entries go'} with it, `}
+            {entryCount > 0 ? 'on' : 'On'} this phone and everywhere you're signed in. This can't be undone.
+            To hide it but keep its history, archive it instead.
+          </p>
+          <div className="button-row">
+            <button type="button" className="button danger" id="editor-delete-confirm" onClick={remove}>Delete for good</button>
+            <button type="button" className="button" id="editor-delete-cancel" onClick={() => setConfirmingDelete(false)}>Keep it</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

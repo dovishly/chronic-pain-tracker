@@ -90,6 +90,14 @@ export const prefs = {
       return fallback;
     }
   },
+  /** Removes every setting, including the supabase-js session. */
+  clearAll(): void {
+    try {
+      for (const key of Object.keys(localStorage)) if (key.startsWith(prefs.key(''))) localStorage.removeItem(key);
+    } catch {
+      // Storage unavailable; nothing to clear.
+    }
+  },
   set(name: string, value: unknown): void {
     try {
       if (value == null) localStorage.removeItem(prefs.key(name));

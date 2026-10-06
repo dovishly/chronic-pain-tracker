@@ -41,6 +41,9 @@ create table if not exists public.entries (
 -- written to be safe to run again: "add column if not exists", or drop a constraint and add it back.
 -- Then raise logbook_schema_version() at the end of this file and SCHEMA_VERSION in src/lib/sync.ts.
 
+-- Version 2: deleting a tracker (a flag, like entries have, so the deletion syncs).
+alter table public.trackers add column if not exists deleted boolean not null default false;
+
 -- The allowed tracker types and entry kinds. Keep in step with TRACKER_TYPES and ENTRY_KINDS in src/lib/model.ts.
 alter table public.trackers drop constraint if exists trackers_type_check;
 alter table public.trackers add constraint trackers_type_check
@@ -206,9 +209,10 @@ cross join lateral (
               end as item
     from public.entries x
     join public.trackers xt on xt.id = x.tracker_id
-    where not x.deleted and x.occurred_at between s.start_utc and s.end_or_now
+    where not x.deleted and not xt.deleted and x.occurred_at between s.start_utc and s.end_or_now
   ) items
-) tl;
+) tl
+where not t.deleted;
 
 create view public.entries_readable
 with (security_invoker = true) as
@@ -254,7 +258,7 @@ left join lateral (
   from episodes x
   where x.tracker_id <> e.tracker_id and e.occurred_at between x.start_utc and x.end_or_now
 ) running on true
-where not e.deleted;
+where not e.deleted and not t.deleted;
 
 -- One row per day and tracker that has anything that day. Episode minutes are clipped at local midnight,
 -- so an episode across midnight counts toward both days.
@@ -308,6 +312,7 @@ select
   count(*) filter (where f.fact = 'moment')::integer             as moments
 from facts f
 join public.trackers t on t.id = f.tracker_id
+where not t.deleted
 group by f.local_date, f.tracker_id, t.name, t.type, t.group_name;
 
 revoke all on public.entries_readable, public.episodes_readable, public.daily_summary from anon;
@@ -318,7 +323,7 @@ grant select on public.entries_readable, public.episodes_readable, public.daily_
 -- src/lib/sync.ts before syncing, and asks for this file to be run again if it's older.
 
 create or replace function public.logbook_schema_version()
-returns integer language sql immutable as $$ select 1 $$;
+returns integer language sql immutable as $$ select 2 $$;
 
 revoke all on function public.logbook_schema_version() from public, anon;
 grant execute on function public.logbook_schema_version() to authenticated;

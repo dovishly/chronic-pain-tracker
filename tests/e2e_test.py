@@ -34,6 +34,8 @@ ANON_KEY = 'anon-key-0123456789abcdefghij'
 EMAIL = 'me@example.com'   # the only account in the fake Supabase
 PASSWORD = 'correct horse battery staple'  # the account's password
 CODE = '123456'            # the sign-in code it always accepts; each email also has a one-time link
+# The schema version the app needs; the fake database reports it once "schema.sql has been run".
+APP_SCHEMA_VERSION = int(re.search(r'const SCHEMA_VERSION = (\d+);', open(os.path.join(ROOT, 'src', 'lib', 'sync.ts')).read()).group(1))
 ACCOUNT_TRACKERS = 16      # the 15 starter trackers plus Stiffness, added on the first phone
 TRICKY_NAME = '<b>Bold</b> & "Q"'  # must be shown as typed, never turned into HTML
 
@@ -45,7 +47,7 @@ class FakeSupabase:
 
     def __init__(self):
         self.tables = {'trackers': {}, 'entries': {}}
-        self.schema_version = 1  # 0 acts like a schema.sql from before versions (the function is missing)
+        self.schema_version = APP_SCHEMA_VERSION  # 0 acts like a schema.sql from before versions (the function is missing)
         self.users = {EMAIL: 'u1'}
         self.links = {}           # token in an emailed sign-in link -> email address
         self.last_link = None     # the link in the latest email
@@ -134,6 +136,13 @@ class FakeSupabase:
             return 201, None
 
         rows = [row for row in self.rows(table) if row['user_id'] == user_id]
+        if method == 'PATCH':  # update, filtered by column=eq.value
+            filters = {column: values[0].removeprefix('eq.') for column, values in query.items() if values[0].startswith('eq.')}
+            updated_at = self.now()
+            for row in rows:
+                if all(json.dumps(row.get(column)) == value or str(row.get(column)) == value for column, value in filters.items()):
+                    self.tables[table][row['id']] = {**row, **body, 'updated_at': updated_at}
+            return 204, None
         if 'updated_at' in query:  # gte.<cursor> or gt.<cursor>
             op, cursor = query['updated_at'][0].split('.', 1)
             rows = [row for row in rows if (row['updated_at'] >= cursor if op == 'gte' else row['updated_at'] > cursor)]
@@ -559,7 +568,7 @@ def test_last_sync_on_an_earlier_day(phone1, supabase):
     phone1.open()
     phone1.go_to('Settings')
     expect(phone1.locator('#sync-panel')).to_contain_text('Last synced on Thu, Sep 3 at')
-    supabase.schema_version = 1
+    supabase.schema_version = APP_SCHEMA_VERSION
 
 
 # ---------- phone 2: a fresh phone joins the account ----------
@@ -586,7 +595,7 @@ def test_setup_sql_can_be_copied_into_the_sql_editor(phone2):
 
 
 def test_fresh_phone_takes_the_accounts_trackers(phone2, supabase):
-    supabase.schema_version = 1  # schema.sql run again
+    supabase.schema_version = APP_SCHEMA_VERSION  # schema.sql run again
     phone2.page.click('#sync-now')
     trackers = phone2.locator('#trackers')
     expect(trackers).to_contain_text('Drowsy')
@@ -644,6 +653,70 @@ def test_choosing_the_account_replaces_this_phones_data(phone3, supabase):
     phone3.page.click('#use-account-data')
     expect(phone3.locator('#trackers')).to_contain_text('Drowsy')
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS
+
+
+def test_delete_a_tracker_everywhere(phone1, phone3, supabase):
+    phone3.locator('.tracker-list li', has_text='Drowsy').locator('[data-edit-tracker]').click()
+    phone3.page.click('#editor-delete')
+    expect(phone3.locator('.tracker-editor .notice')).to_contain_text('Delete Drowsy for good?')
+    expect(phone3.locator('.tracker-editor .notice')).to_contain_text('entries go with it')
+    phone3.page.click('#editor-delete-confirm')
+    expect(phone3.locator('#trackers')).not_to_contain_text('Drowsy')
+
+    drowsy = next(row['id'] for row in supabase.rows('trackers') if row['name'] == 'Drowsy')
+    its_entries = lambda: [row for row in supabase.rows('entries') if row['tracker_id'] == drowsy]
+    deleted_everywhere = lambda: supabase.tables['trackers'][drowsy]['deleted'] and all(row['deleted'] for row in its_entries())
+    phone3.wait_for(deleted_everywhere)
+    assert its_entries() and deleted_everywhere()
+
+    # Another phone on the account drops it at its next sync.
+    phone1.go_to('Settings')
+    phone1.page.click('#sync-now')
+    expect(phone1.locator('#trackers')).not_to_contain_text('Drowsy')
+
+
+def test_delete_an_archived_tracker_takes_a_second_tap(phone3):
+    phone3.page.evaluate("document.querySelector('#archived-trackers').open = true")
+    delete = phone3.locator('#archived-trackers li', has_text='Meal').locator('[data-delete-tracker]')
+    delete.click()
+    expect(delete).to_have_text('Delete for good?')
+    delete.click()
+    expect(phone3.locator('#archived-trackers')).to_have_count(0)  # Meal was the only archived tracker
+
+
+def live_tracker_names(supabase):
+    return sorted(row['name'] for row in supabase.rows('trackers') if not row['deleted'])
+
+
+def test_reset_this_phone_leaves_supabase_alone(phone2, supabase):
+    in_supabase = live_tracker_names(supabase)
+    phone2.go_to('Settings')
+    phone2.page.click('#reset-device')
+    expect(phone2.locator('.notice', has_text='Reset this phone?')).to_contain_text('Your synced data stays in Supabase')
+    phone2.page.click('#reset-device-confirm')
+    expect(phone2.locator('#sync-pill')).to_have_text('On this device only')  # reopened, signed out
+    phone2.go_to('Settings')
+    expect(phone2.locator('#trackers')).to_contain_text('Tired')  # the starter trackers again
+    expect(phone2.locator('#trackers')).not_to_contain_text('Stiffness')
+    assert live_tracker_names(supabase) == in_supabase
+
+
+def test_reset_everywhere(phone1, phone3, supabase):
+    phone3.go_to('Settings')
+    phone3.page.click('#reset-everywhere')
+    phone3.page.click('#reset-everywhere-confirm')
+    expect(phone3.locator('.toast')).to_contain_text('Everything was reset')
+    expect(phone3.locator('#trackers')).not_to_contain_text('Stiffness')
+    starters = sorted(phone3.locator('#trackers .tracker-name').evaluate_all('spans => spans.map(s => s.firstChild.textContent.trim())'))
+    phone3.wait_for(lambda: live_tracker_names(supabase) == starters)
+    assert live_tracker_names(supabase) == starters
+    assert not [row for row in supabase.rows('entries') if not row['deleted']]
+
+    # Another phone on the account follows at its next sync.
+    phone1.go_to('Settings')
+    phone1.page.click('#sync-now')
+    expect(phone1.locator('#trackers')).not_to_contain_text('Stiffness')
+    assert phone1.locator('#trackers').inner_text().count('Headache') == 1
 
 
 def test_no_sideways_scrolling(phone1, phone2, phone3):
