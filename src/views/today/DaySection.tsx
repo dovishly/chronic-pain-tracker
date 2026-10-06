@@ -1,5 +1,3 @@
-// One day on Today: a timeline of episodes and moments, and the log of entries,
-// with arrows to step between days that have entries.
 import { useState } from 'react';
 import { useData } from '../../hooks';
 import { clockTime, dayKey, dayLabel, dayStart, formatDuration, formatTime, nextDay } from '../../lib/util';

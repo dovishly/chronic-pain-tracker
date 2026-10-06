@@ -1,16 +1,9 @@
-// Promise wrapper around the on-device IndexedDB database.
-// Stores: trackers and entries (keyed by id), outbox (writes waiting to sync, keyed "table:id"),
-// and meta (small key/value records such as sync cursors).
+// IndexedDB stores: trackers and entries (by id), outbox (writes waiting to sync, by "table:id"), meta (key/value).
 
 export type StoreName = 'trackers' | 'entries' | 'outbox' | 'meta';
 
-/**
- * Each function upgrades the database by one version; the browser runs the ones a device hasn't had yet,
- * in order. To change the database (a new store or index), append a function. Never edit or remove
- * one: phones may be on any older version.
- */
+/** One function per database version. Append to change the database; never edit one, since devices may be on any older version. */
 const UPGRADES: ((database: IDBDatabase, transaction: IDBTransaction) => void)[] = [
-  // Version 1: the original stores.
   database => {
     database.createObjectStore('trackers', { keyPath: 'id' });
     database.createObjectStore('entries', { keyPath: 'id' });

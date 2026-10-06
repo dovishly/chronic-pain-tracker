@@ -1,4 +1,3 @@
-// The tracker editor: name, type, group, color, and the settings for the tracker's type.
 import { useEffect, useRef, useState } from 'react';
 import { useData } from '../../hooks';
 import {

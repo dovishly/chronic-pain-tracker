@@ -1,4 +1,3 @@
-// The Settings view: trackers (list and editor), sync, and data export.
 import { useState } from 'react';
 import { useData } from '../../hooks';
 import { dayKey, dayLabel, uuid } from '../../lib/util';

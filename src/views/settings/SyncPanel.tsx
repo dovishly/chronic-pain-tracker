@@ -1,4 +1,3 @@
-// The sync panel: connect a Supabase project, sign in with an emailed code, and sync status.
 import { useState } from 'react';
 import { useSyncState } from '../../hooks';
 import { dayKey, dayLabel, formatTime, prefs } from '../../lib/util';

@@ -1,4 +1,3 @@
-// The Today view: what's running now, the start/stop and moment buttons, and one day's timeline and log.
 import { useNow, useData } from '../../hooks';
 import { formatDuration, startedAt } from '../../lib/util';
 import { activeEpisodes, groupTrackers, sortedTrackers, type ActiveEpisode, type Tracker } from '../../lib/model';

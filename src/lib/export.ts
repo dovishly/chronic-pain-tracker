@@ -1,4 +1,3 @@
-// Exports: the analysis tables as CSV files in one .zip (see analysis.ts), and a JSON backup of everything.
 import { dayKey, nowIso } from './util';
 import { dataStore } from './data';
 import { buildAnalysisTables, toCsv } from './analysis';
@@ -10,10 +9,7 @@ interface ExportFile {
   type: string;
 }
 
-/**
- * Opens the share sheet where the browser can share files (iPhone: Save to Files, AirDrop, Mail…),
- * otherwise downloads the file.
- */
+/** Opens the share sheet where the browser can share files, otherwise downloads. */
 async function shareOrDownload(file: ExportFile): Promise<void> {
   const shareable = new File([file.data], file.name, { type: file.type });
   try {
@@ -36,10 +32,7 @@ async function shareOrDownload(file: ExportFile): Promise<void> {
 
 const today = () => dayKey(Date.now());
 
-/**
- * One .zip holding a folder of five CSV files: daily, checkins, episodes, entries, trackers.
- * Unzipped, they arrive together in a folder named after the export date.
- */
+/** The analysis CSVs in one .zip, in a folder named after today's date. */
 export function exportForAnalysis(): Promise<void> {
   const folder = `logbook-${today()}`;
   const encoder = new TextEncoder();

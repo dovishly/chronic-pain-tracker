@@ -1,5 +1,3 @@
-// The Check in view: one question per check-in tracker, grouped. The draft lives in App,
-// so answers survive switching tabs until they're saved.
 import { useEffect, type Dispatch, type SetStateAction } from 'react';
 import { useData } from '../hooks';
 import { toDateTimeInputValue, unhandled } from '../lib/util';

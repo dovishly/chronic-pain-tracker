@@ -1,11 +1,10 @@
-// The tracker/entry model: types, constants, and data derived from entries.
-// Field names on trackers and entries match the Supabase columns (see schema.sql and CLAUDE.md).
+// Field names on trackers and entries are the Supabase column names.
 import { dayKey, nowIso, uuid, unhandled } from './util';
 
 /* ---------- types ---------- */
 
-// To add a tracker type or entry kind, add it here and follow the checklist in CLAUDE.md
-// ("Changing the data model"); TypeScript then points at every switch that must handle it.
+// Switches over these end in unhandled(), so TypeScript lists every place a new one needs handling.
+// The check constraints in schema.sql must match.
 export const TRACKER_TYPES = ['rating', 'episode', 'moment', 'number', 'choice', 'text'] as const;
 export type TrackerType = (typeof TRACKER_TYPES)[number];
 
@@ -122,16 +121,12 @@ export const STARTER_TRACKERS: StarterTracker[] = [
 
 /* ---------- data from storage or the server ---------- */
 
-/**
- * Fills in defaults for a tracker read from IndexedDB or Supabase. Rows saved by an older version
- * of the app may lack newer fields: when you add a field, give it its default here.
- */
+/** Fills in defaults for a tracker from IndexedDB or Supabase: older rows may lack newer fields. */
 export function normalizeTracker(raw: Record<string, unknown>): Tracker {
   const { user_id: _user, created_at: _created, ...tracker } = raw; // server-only columns
   return { ...tracker, config: tracker.config || {} } as Tracker;
 }
 
-/** Fills in defaults for an entry read from IndexedDB or Supabase; see normalizeTracker. */
 export function normalizeEntry(raw: Record<string, unknown>): Entry {
   const { user_id: _user, created_at: _created, ...entry } = raw;
   // Postgres numeric can arrive as a string.
@@ -204,10 +199,7 @@ export function entryText(entry: Entry, tracker: Tracker): string {
 
 /* ---------- trackers ---------- */
 
-/**
- * Trackers in display order, limited to the given type or list of types (null for all).
- * Archived trackers are left out unless includeArchived is set.
- */
+/** Trackers in display order, of the given types (null for all). */
 export function sortedTrackers(
   data: Data,
   types: TrackerType | TrackerType[] | null = null,

@@ -1,5 +1,4 @@
-// Local writes. Every change is saved on this device first (memory and IndexedDB),
-// then queued in the outbox for the next sync. The network is never on the tap path.
+// Writes go to memory and IndexedDB, then the outbox for the next sync. Never to the network directly.
 import { nowIso, uuid } from './util';
 import { db } from './db';
 import { trackers, entries, pendingKeys, dataChanged } from './data';

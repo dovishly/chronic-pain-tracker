@@ -1,6 +1,3 @@
-// Sync with the owner's own Supabase project, through supabase-js. Every write is saved on the device
-// and queued in the outbox first (store.ts), so the app works the same offline. The protocol is
-// described in CLAUDE.md.
 import { createClient, type Session, type Subscription, type SupabaseClient } from '@supabase/supabase-js';
 import { prefs } from './util';
 import { db } from './db';
@@ -32,11 +29,7 @@ const PULL_PAGE = 1000;
 const SYNC_DELAY_AFTER_WRITE_MS = 700; // lets a burst of taps go up in one request
 const AUTH_PREF = 'auth'; // the pref supabase-js keeps the session in
 
-/**
- * The schema.sql version this app needs: public.logbook_schema_version() in the database must be at
- * least this. Raise both together whenever schema.sql changes the tables (see "Changing the data model"
- * in CLAUDE.md), so a phone never syncs against a database that's missing what it sends.
- */
+/** The lowest logbook_schema_version() this app syncs with. Raise it with the one in schema.sql. */
 const SCHEMA_VERSION = 1;
 const OUTDATED_SCHEMA_MESSAGE =
   'Your Supabase database needs an update. Run the latest schema.sql in the Supabase SQL Editor (see the setup guide), then tap Sync now.';
@@ -45,7 +38,7 @@ let project = prefs.get<Project>('project');
 let client: SupabaseClient | null = null;
 let authSubscription: Subscription | null = null;
 let session: Session | null = null;
-let leaving = false; // signing out or disconnecting on purpose, so the sign-out isn't reported as an expired sign-in
+let leaving = false; // signing out on purpose, so SIGNED_OUT isn't reported as an expired sign-in
 
 let status: SyncStatus = 'local';
 let statusDetail = '';
@@ -93,12 +86,10 @@ class WaitingForChoice extends Error {}
 /** Thrown when the database's schema is older than this app needs. */
 class OutdatedSchema extends Error {}
 
-/** True for an error from a request that never reached the server (offline, DNS, refused). */
 const isNetworkFailure = (error: unknown) => error instanceof TypeError || (error as { status?: unknown })?.status === 0;
 
 /* ---------- the Supabase client ---------- */
 
-/** Opens the client for the connected project. Its session is restored from storage and refreshed as needed. */
 function openClient(): void {
   if (!project) return;
   client = createClient(project.url, project.key, {

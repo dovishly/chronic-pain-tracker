@@ -1,4 +1,3 @@
-// Data lives in IndexedDB on the device and syncs to your own Supabase project when connected.
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';

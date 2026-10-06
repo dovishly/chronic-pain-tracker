@@ -16,7 +16,6 @@ function pillContent({ status, waiting, lastSync }: SyncState): [string, string]
   return [lastSync ? `Synced ${formatTime(lastSync)}` : 'Synced', 'ok'];
 }
 
-/** Sync status in the header. Tapping it opens Settings, where the details are. */
 export function SyncPill({ onClick }: { onClick: () => void }) {
   const [label, tone] = pillContent(useSyncState());
   return (

@@ -1,4 +1,4 @@
-// A minimal .zip writer, so an export with several files arrives as one file. Written by hand to avoid a dependency.
+// A minimal .zip writer, to avoid a dependency.
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);

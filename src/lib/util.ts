@@ -1,5 +1,3 @@
-// Small helpers: dates and times, ids, saved preferences.
-
 export const MINUTE_MS = 60_000;
 export const DAY_MS = 86_400_000;
 
@@ -58,10 +56,8 @@ export function startedAt(ms: number): string {
 /* ---------- exhaustive switches ---------- */
 
 /**
- * Put this in the default branch of a switch that should handle every case, e.g. every tracker type:
- *   default: return unhandled(tracker.type, null);
- * TypeScript reports an error here when a case is missing (say, after adding a tracker type). At runtime
- * it returns the fallback, so data from a newer version of the app (an unknown type) is skipped, not fatal.
+ * For the default branch of a switch that must handle every case: `default: return unhandled(tracker.type, null);`
+ * A missing case is a type error. At runtime it returns the fallback, so unknown values from a newer app are skipped.
  */
 export function unhandled<T>(value: never, fallback: T): T {
   void value;

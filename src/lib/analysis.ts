@@ -1,17 +1,5 @@
-// Analysis-ready tables built from the raw entries, for export.
-//
-//   daily      one row per calendar day, one or more columns per tracker: for correlating across days
-//   checkins   one row per check-in, one column per question: for correlating answers given together
-//   episodes   one row per start/stop episode: start, end, duration, peak severity, and a timeline of
-//              everything logged while it ran
-//   entries    one row per entry: the raw log, with episode_id linking start/end/level rows, and
-//              "during" naming the other episodes running at the time
-//   trackers   one row per tracker: what each one is, with its levels and options
-//
-// They share tracker_id, entry_id, episode_id and checkin_id. Dates and times are the device's local
-// time ("datetime" is "2026-10-03 12:35:26", which spreadsheets read as a date and time); *_utc columns
-// are the exact UTC timestamps. schema.sql builds the same episodes and daily figures as SQL views;
-// keep the two in step (tests/fixtures/analysis.json and both tests pin the results).
+// The export's tables, built from the entries. Times are local; *_utc columns are UTC.
+// The views in schema.sql must give the same episodes and daily figures.
 import { MINUTE_MS, clockTime, dayKey, dayStart, nextDay, pad2, unhandled } from './util';
 import {
   allEpisodes, byTime, entryLabel, entryText, entryTime, liveEntries, sortedTrackers,
@@ -36,7 +24,6 @@ const total = (numbers: number[]) => numbers.reduce((a, b) => a + b, 0);
 const average = (numbers: number[]) => (numbers.length ? round2(total(numbers) / numbers.length) : null);
 const sum = (numbers: number[]) => (numbers.length ? round2(total(numbers)) : null);
 const joinText = (texts: (string | null)[]) => texts.filter(Boolean).join(' | ') || null;
-/** The entries' values, leaving out entries without one. */
 const valuesOf = (entries: Entry[]) => entries.map(e => e.value).filter((n): n is number => n != null);
 /** Which check-in an answer belongs to. Answers without a check-in id are grouped by time. */
 const checkinKey = (answer: Entry) => answer.checkin_id || 'at ' + answer.occurred_at;
@@ -73,7 +60,7 @@ interface Context {
   runningAt: Map<string, Episode[]>;       // entryId -> other trackers' episodes running at that moment
 }
 
-/** At most this many items in an episode's timeline (one left running for weeks would otherwise be huge). */
+/** Caps a timeline, which would be huge for an episode left running for weeks. */
 const TIMELINE_LIMIT = 100;
 
 /** Tracker names for column headers; a repeated name gets " (2)", " (3)"… so every column is unique. */
@@ -97,11 +84,7 @@ function choiceOptions(tracker: Tracker, entries: Entry[]): string[] {
   return options;
 }
 
-/**
- * Links episodes to their entries: the start, the end, the levels logged while each ran, a timeline
- * of everything logged while each ran, and which episodes were running when each entry was logged.
- * A level on the boundary between two episodes (a restart) belongs to the earlier one.
- */
+/** A level on the boundary between two episodes (a restart) belongs to the earlier one. */
 function linkEpisodes(data: Data, entries: Entry[], episodes: Episode[]) {
   const trackerSort = (trackerId: string) => data.trackers.get(trackerId)?.sort_order ?? 0;
 
@@ -192,7 +175,6 @@ function entriesBetween(sorted: Entry[], from: number, to: number): Entry[] {
   return found;
 }
 
-/** Check-in answers grouped by check-in, oldest first. */
 function checkinGroups(entries: Entry[]): { key: string; time: number; answers: Entry[] }[] {
   const groups = new Map<string, { key: string; time: number; answers: Entry[] }>();
   for (const e of entries) {
@@ -263,7 +245,7 @@ function entriesTable({ data, entries, episodeIdByEntry, runningAt }: Context): 
         e.note,
         e.checkin_id,
         episodeIdByEntry.get(e.id) ?? null,
-        duringNames(runningAt.get(e.id), data),   // other episodes running at the time
+        duringNames(runningAt.get(e.id), data),
         duringIds(runningAt.get(e.id)),
       ];
     }),
@@ -364,7 +346,7 @@ function checkinsTable({ data, entries, trackers, names, runningAt }: Context): 
       weekday(time),
       new Date(time).toISOString(),
       ...cellsFor.map(cell => cell(answers)),
-      duringNames(runningAt.get(answers[0].id), data), // episodes running at the time
+      duringNames(runningAt.get(answers[0].id), data),
       joinText(answers.filter(a => a.note).map(a => `${data.trackers.get(a.tracker_id)!.name}: ${a.note}`)),
     ]),
   };

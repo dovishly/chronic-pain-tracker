@@ -1,5 +1,3 @@
-// What the person can do that changes data. Components call these directly; the UI updates
-// because every save notifies the data store. Each action is wrapped in safely(), so a failure shows a toast.
 import { MINUTE_MS, formatTime, formatDuration, uuid, unhandled } from './util';
 import { dataStore } from './data';
 import {
@@ -26,7 +24,6 @@ async function changeEntry(id: string, changes: Partial<Entry>): Promise<void> {
   if (entry) await saveEntry({ ...entry, ...changes });
 }
 
-/** Starts the tracker's episode, or ends it if it's running. */
 export const toggleEpisode = safely(async (trackerId: string) => {
   const tracker = trackerById(trackerId);
   const running = activeEpisodes(data())[trackerId];
@@ -39,7 +36,7 @@ export const toggleEpisode = safely(async (trackerId: string) => {
   }
 });
 
-/** Logs a severity level (1-based) for a running episode. */
+/** level is 1-based. */
 export const logLevel = safely(async (trackerId: string, level: number) => {
   const tracker = trackerById(trackerId);
   const label = levelLabel(tracker, level) ?? String(level);
@@ -53,7 +50,6 @@ export const logMoment = safely(async (trackerId: string) => {
   toast(`${tracker.name} at ${formatTime(entryTime(entry))}`, entry.id);
 });
 
-/** Moves an entry earlier (the toast's −5 and −15 min buttons). */
 export const moveEntryEarlier = safely(async (id: string, minutes: number) => {
   const entry = data().entries.get(id);
   if (!entry) return;
@@ -62,13 +58,12 @@ export const moveEntryEarlier = safely(async (id: string, minutes: number) => {
   toast(`Moved to ${formatTime(newTime)}`, id);
 });
 
-/** Deletes an entry; message is the toast to show ("Removed" from Undo, "Deleted" from the log). */
 export const deleteEntry = safely(async (id: string, message: string) => {
   await changeEntry(id, { deleted: true });
   toast(message);
 });
 
-/** Saves the log's edit row: time is "HH:MM" on the entry's own day (empty to keep it), note may be empty. */
+/** time is "HH:MM" on the entry's day, or "" to keep it. */
 export const editEntry = safely(async (id: string, time: string, note: string) => {
   const entry = data().entries.get(id);
   if (!entry) return;
@@ -88,8 +83,8 @@ export const editEntry = safely(async (id: string, time: string, note: string) =
 export type Answer = number | string | string[] | null;
 
 /**
- * Saves every answered question as an entry, all sharing one checkin_id and timestamp.
- * when is a datetime-local value ("" for now). Returns the check-in's time, or null if nothing was answered.
+ * Saves each answer as an entry, sharing one checkin_id. when is a datetime-local value ("" for now).
+ * Returns the check-in's time, or null if nothing was answered.
  */
 export const saveCheckin = safely(async (answers: Record<string, Answer>, when: string): Promise<number | null> => {
   const time = when ? new Date(when).getTime() : Date.now();
@@ -135,7 +130,7 @@ export const saveCheckin = safely(async (answers: Record<string, Answer>, when: 
 
 /* ---------- trackers ---------- */
 
-/** Saves a tracker from the editor. New trackers go to the end of the list. */
+/** New trackers go to the end of the list. */
 export const saveTrackerEdit = safely(async (tracker: Tracker) => {
   const isNew = !data().trackers.has(tracker.id);
   const lastSortOrder = Math.max(0, ...[...data().trackers.values()].map(t => t.sort_order || 0));

@@ -32,10 +32,7 @@ export const toastStore = {
   },
 };
 
-/**
- * Wraps an async function so a failure shows "Something went wrong" instead of disappearing.
- * The wrapped function resolves to undefined when it failed.
- */
+/** Wraps an async function so a failure shows a toast. It then resolves to undefined. */
 export function safely<Args extends unknown[], Result>(action: (...args: Args) => Promise<Result>) {
   return async (...args: Args): Promise<Result | undefined> => {
     try {
