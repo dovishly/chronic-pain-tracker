@@ -10,7 +10,8 @@
   --muted: #5A6672;
   --line: #D7DDE3;
   --field: #F6F8FA;
-  --on: #FFFFFF;          /* text on a tracker color */
+  --on: #FFFFFF;
+  /* text on a tracker color */
   --danger: #B42318;
   --ok: #1E7B4A;
   --warn: #9A6200;
@@ -167,7 +168,7 @@ button:disabled {
   flex-wrap: wrap;
 }
 
-.row-between > h2 {
+.row-between>h2 {
   margin: 0;
 }
 
@@ -524,7 +525,7 @@ textarea {
   min-width: 0;
 }
 
-.level-buttons button + button {
+.level-buttons button+button {
   border-left: 1px solid color-mix(in srgb, var(--on) 25%, transparent);
 }
 
