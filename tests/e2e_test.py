@@ -439,6 +439,16 @@ def test_add_a_tracker(phone1):
     expect(phone1.locator('#trackers')).to_contain_text('Stiffness')
 
 
+def test_custom_color(phone1):
+    phone1.locator('.tracker-list li', has_text='Stiffness').locator('[data-edit-tracker]').click()
+    phone1.page.fill('#editor-custom-color', '#ffd60a')  # a light yellow, where white text wouldn't read
+    expect(phone1.locator('.custom-color')).to_have_class('custom-color is-selected')
+    phone1.page.click('#editor-save')
+    dot = phone1.locator('.tracker-list li', has_text='Stiffness').locator('.color-dot')
+    expect(dot).to_have_css('background-color', 'rgb(255, 214, 10)')
+    assert dot.evaluate("dot => dot.style.getPropertyValue('--on')") == '#15202B'  # dark text on it
+
+
 def test_rename_a_tracker_but_not_change_its_type(phone1):
     phone1.locator('.tracker-list li', has_text='Tired').locator('[data-edit-tracker]').click()
     expect(phone1.locator('#editor-type')).to_be_disabled()  # Tired has entries
@@ -603,6 +613,9 @@ def test_fresh_phone_takes_the_accounts_trackers(phone2, supabase):
     # Its own starter trackers were replaced, not added to the account.
     assert trackers.inner_text().count('Headache') == 1
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS
+    # The custom color picked on the first phone came along.
+    stiffness_dot = phone2.locator('.tracker-list li', has_text='Stiffness').locator('.color-dot')
+    expect(stiffness_dot).to_have_css('background-color', 'rgb(255, 214, 10)')
 
 
 def test_fresh_phone_shows_the_accounts_entries(phone2):

@@ -23,7 +23,7 @@ export interface Tracker {
   name: string;
   type: TrackerType;
   group_name: string | null; // heading the tracker is listed under; null or '' means "Other"
-  color: string;          // one of COLORS
+  color: string;          // one of COLORS, or a custom "#rrggbb"
   config: TrackerConfig;
   sort_order: number;
   archived: boolean;
@@ -83,8 +83,12 @@ export const CHECKIN_TYPES: TrackerType[] = ['rating', 'number', 'choice', 'text
 /** Color keys; each maps to a CSS variable --c-<key> in styles.css. */
 export const COLORS = ['indigo', 'amber', 'teal', 'rose', 'violet', 'green', 'slate', 'sky'];
 
+/** A color picked with the custom color picker, rather than one of COLORS. */
+export const isCustomColor = (color: string) => /^#[0-9a-f]{6}$/i.test(color);
+
 /** CSS value for a tracker's color; unknown keys fall back to slate. */
-export const colorVar = (color: string) => `var(--c-${COLORS.includes(color) ? color : 'slate'})`;
+export const colorVar = (color: string) =>
+  isCustomColor(color) ? color : `var(--c-${COLORS.includes(color) ? color : 'slate'})`;
 
 /** Starting config when a tracker is created with, or switched to, each type. */
 export function defaultConfig(type: TrackerType): TrackerConfig {

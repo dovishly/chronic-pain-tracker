@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useData } from '../../hooks';
 import {
-  COLORS, TYPE_HELP, TYPE_LABELS, defaultConfig, liveEntries, sortedTrackers, trackerProblem,
+  COLORS, TYPE_HELP, TYPE_LABELS, defaultConfig, isCustomColor, liveEntries, sortedTrackers, trackerProblem,
   type Tracker, type TrackerConfig, type TrackerType,
 } from '../../lib/model';
 import { archiveTracker, deleteTracker, saveTrackerEdit } from '../../lib/actions';
@@ -166,6 +166,12 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
               onClick={() => setColor(c)}
             />
           ))}
+          {/* The phone's own color picker, behind a rainbow swatch that shows the color once picked. */}
+          <label className={isCustomColor(color) ? 'custom-color is-selected' : 'custom-color'}
+            style={isCustomColor(color) ? colorStyle(color) : undefined}>
+            <input type="color" id="editor-custom-color" aria-label="Custom color"
+              value={isCustomColor(color) ? color : '#888888'} onChange={e => setColor(e.target.value)} />
+          </label>
         </div>
       </div>
 

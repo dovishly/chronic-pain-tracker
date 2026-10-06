@@ -999,15 +999,24 @@ textarea {
   margin-top: 8px;
 }
 
+/* One row: the swatches shrink a little on a narrow phone rather than wrap. */
 .swatches {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatches button,
+.custom-color {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 34px;
+  aspect-ratio: 1;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .swatches button {
-  width: 34px;
-  height: 34px;
   border-radius: 50%;
   border: 3px solid transparent;
   background: var(--c);
@@ -1015,4 +1024,34 @@ textarea {
 
 .swatches button[aria-pressed="true"] {
   border-color: var(--ink);
+}
+
+.custom-color {
+  position: relative;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  background: conic-gradient(#E5484D, #F2C14E, #46A758, #0B7A6F, #1F6FAE, #6B4FB3, #E5484D) border-box;
+  cursor: pointer;
+}
+
+.custom-color.is-selected {
+  background: var(--c);
+  border-color: var(--ink);
+}
+
+.custom-color:focus-within {
+  outline: 3px solid var(--c-sky);
+  outline-offset: 2px;
+}
+
+/* Invisible, covering the swatch, so a tap opens the picker. */
+.custom-color input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
