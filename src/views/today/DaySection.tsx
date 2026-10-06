@@ -5,7 +5,7 @@ import {
   allEpisodes, daysWithEntries, entryLabel, entryText, entryTime, liveEntries, sortedTrackers,
   type Data, type Entry, type Episode,
 } from '../../lib/model';
-import { deleteEntry, editEntry } from '../../lib/actions';
+import { deleteEntry, deleteEpisode, editEntry, editEpisode } from '../../lib/actions';
 import { colorStyle } from '../../components/style';
 
 interface Props {
@@ -105,37 +105,47 @@ function DayTotals({ bounds, entries, episodes }: { bounds: DayBounds; entries: 
 
 const checkinKey = (answer: Entry) => answer.checkin_id || 'at ' + answer.occurred_at;
 
-/** One row of the timeline. Newest first; episodes that cross the day's edges get an edge row. */
+/**
+ * One row of the timeline, newest first. An episode is one row, where it started (or at the bottom, if it
+ * started on an earlier day), and its bar runs up beside whatever was logged while it lasted.
+ */
 type Row =
   | { type: 'entry'; key: string; time: number; entry: Entry; nested?: boolean }
   | { type: 'checkin'; key: string; time: number; answers: Entry[] }
+  | { type: 'episode'; key: string; time: number | null; episode: Episode }
   | { type: 'gap'; key: string; ms: number }
-  | { type: 'edge'; key: string; episode: Episode; at: 'top' | 'bottom' };
+  | { type: 'now'; key: string; time: number }; // at the top of today, where running episodes reach
 
-const edgeKey = (at: 'top' | 'bottom', episode: Episode) => `${at}:${episode.id}`;
+const episodeKey = (episode: Episode) => 'episode:' + episode.id;
+const rowTime = (row: Row) => (row.type === 'gap' ? null : row.time);
 
-/** Among entries at the same moment, the ones that close something come above the ones that open it. */
-const KIND_ORDER: Record<string, number> = { end: 0, level: 1, moment: 2, answer: 2, start: 3 };
+/** Among rows at the same moment, the ones that open something go below the rest. */
+const rank = (row: Row) => (row.type === 'episode' ? 1 : 0);
 
-function buildRows(data: Data, entries: Entry[], episodes: Episode[], bounds: DayBounds, openCheckin: string | null): Row[] {
+function buildRows(
+  data: Data, entries: Entry[], episodes: Episode[], bounds: DayBounds, now: number, openCheckin: string | null,
+): Row[] {
   const sortOrder = (trackerId: string) => data.trackers.get(trackerId)?.sort_order ?? 0;
+  const endIds = new Set(episodes.map(e => e.endEntryId));
   const timed: (Row & { time: number })[] = [];
   const checkins = new Map<string, Entry[]>();
   for (const e of entries) {
-    if (e.kind !== 'answer') timed.push({ type: 'entry', key: e.id, time: entryTime(e), entry: e });
-    else checkins.set(checkinKey(e), [...(checkins.get(checkinKey(e)) ?? []), e]);
+    if (e.kind === 'answer') checkins.set(checkinKey(e), [...(checkins.get(checkinKey(e)) ?? []), e]);
+    // Starts and ends are shown by their episode's row; an end with no start of its own stays visible.
+    else if (e.kind !== 'start' && !endIds.has(e.id)) timed.push({ type: 'entry', key: e.id, time: entryTime(e), entry: e });
   }
   for (const [key, answers] of checkins) {
     answers.sort((a, b) => sortOrder(a.tracker_id) - sortOrder(b.tracker_id));
     timed.push({ type: 'checkin', key, time: entryTime(answers[0]), answers });
   }
-  const kindOf = (row: Row) => (row.type === 'entry' ? row.entry.kind : 'answer');
-  timed.sort((a, b) => b.time - a.time || KIND_ORDER[kindOf(a)] - KIND_ORDER[kindOf(b)] || (a.key < b.key ? -1 : 1));
+  for (const episode of episodes) {
+    if (episode.start >= bounds.from) timed.push({ type: 'episode', key: episodeKey(episode), time: episode.start, episode });
+  }
+  timed.sort((a, b) => b.time - a.time || rank(a) - rank(b) || (a.key < b.key ? -1 : 1));
 
-  const rows: Row[] = episodes
-    .filter(e => e.status === 'ongoing' || e.end >= bounds.to)
-    .sort((a, b) => b.end - a.end)
-    .map(episode => ({ type: 'edge', key: edgeKey('top', episode), episode, at: 'top' }));
+  if (now >= bounds.from && now < bounds.to) timed.unshift({ type: 'now', key: 'now', time: now });
+
+  const rows: Row[] = [];
   timed.forEach((row, i) => {
     const newer = timed[i - 1];
     if (newer && newer.time - row.time >= GAP_MS) rows.push({ type: 'gap', key: 'gap:' + row.key, ms: newer.time - row.time });
@@ -145,42 +155,53 @@ function buildRows(data: Data, entries: Entry[], episodes: Episode[], bounds: Da
     }
   });
   for (const episode of episodes.filter(e => e.start < bounds.from).sort((a, b) => b.start - a.start)) {
-    rows.push({ type: 'edge', key: edgeKey('bottom', episode), episode, at: 'bottom' });
+    rows.push({ type: 'episode', key: episodeKey(episode), time: null, episode });
   }
   return rows;
 }
 
 /* ---------- episode bars ---------- */
 
-/** How a bar crosses one row: through it, starting at its marker (going up), ending at it, or both. */
-type Segment = 'through' | 'start' | 'end' | 'dot';
+/**
+ * How a bar crosses one row: through it; starting at its dot and going up; ending with a ring at the row's
+ * top edge (after the last thing logged while it lasted); both, for one with nothing logged during it;
+ * or reaching the Now row, still going.
+ */
+type Segment = 'through' | 'start' | 'end' | 'start-end' | 'now';
 
 interface Bar {
   episode: Episode;
-  top: number;    // row index where it ends (rows are newest first)
-  bottom: number; // row index where it starts
+  top: number;    // row index where it stops (rows are newest first)
+  bottom: number; // row index of its own row
+  // ended: stops at top, with a ring; now: still going, up to the Now row; later: runs off the top, since
+  // it carried on past this (earlier) day.
+  ending: 'ended' | 'now' | 'later';
   lane: number;
 }
 
 /** Each episode's rows, and a lane for it: side by side when they overlap, sharing a lane when they don't. */
-function layOutBars(rows: Row[], entries: Entry[], episodes: Episode[]): { bars: Bar[]; lanes: number } {
-  const index = new Map(rows.map((row, i) => [row.type === 'entry' ? row.entry.id : row.key, i]));
+function layOutBars(rows: Row[], episodes: Episode[], bounds: DayBounds): { bars: Bar[]; lanes: number } {
   const spans: Omit<Bar, 'lane'>[] = [];
   for (const episode of episodes) {
-    const bottom = index.get(episode.id) ?? index.get(edgeKey('bottom', episode));
-    // Ended by an end entry, by a restart (the tracker's next start), or past the day's end.
-    const restart = entries.find(e => e.tracker_id === episode.trackerId && e.kind === 'start' && entryTime(e) === episode.end);
-    const top = index.get(edgeKey('top', episode))
-      ?? (episode.endEntryId ? index.get(episode.endEntryId) : restart && index.get(restart.id));
-    if (top !== undefined && bottom !== undefined) spans.push({ episode, top, bottom });
+    const bottom = rows.findIndex(row => row.key === episodeKey(episode));
+    if (bottom < 0) continue;
+    const openTop = episode.status === 'ongoing' || episode.end >= bounds.to;
+    // Up to the newest row logged while it lasted.
+    const during = rows.findIndex((row, i) => {
+      const time = rowTime(row);
+      return i < bottom && row.type !== 'now' && time !== null && time >= episode.start && time <= episode.end;
+    });
+    const ending = !openTop ? 'ended' : rows[0].type === 'now' ? 'now' : 'later';
+    spans.push({ episode, bottom, ending, top: openTop ? 0 : during < 0 ? bottom : during });
   }
 
   const laneTops: number[] = []; // the top row of each lane's latest bar
   const bars = spans
     .sort((a, b) => b.bottom - a.bottom)
     .map(span => {
-      // A lane is free once its last bar has ended at or below this one's start.
-      let lane = laneTops.findIndex(top => top >= span.bottom);
+      // A lane is free once its last bar has stopped below this one's row. (Not in it: a bar that stops
+      // fills most of its last row, so this one's dot would land on it.)
+      let lane = laneTops.findIndex(top => top > span.bottom);
       if (lane < 0) lane = laneTops.length;
       laneTops[lane] = span.top;
       return { ...span, lane };
@@ -188,14 +209,17 @@ function layOutBars(rows: Row[], entries: Entry[], episodes: Episode[]): { bars:
   return { bars, lanes: laneTops.length };
 }
 
-/** The bar segments drawn in one row, per lane. Edge rows run the bar off the end of the list. */
-function segmentsAt(i: number, row: Row, bars: Bar[], lanes: number): [Bar, Segment][][] {
+/** The bar segments drawn in one row, per lane. */
+function segmentsAt(i: number, rows: Row[], bars: Bar[], lanes: number): [Bar, Segment][][] {
   const cells: [Bar, Segment][][] = Array.from({ length: lanes }, () => []);
   for (const bar of bars) {
     if (i < bar.top || i > bar.bottom) continue;
-    const segment: Segment = row.type === 'edge' || (i !== bar.top && i !== bar.bottom) ? 'through'
-      : bar.top === bar.bottom ? 'dot'
-      : i === bar.bottom ? 'start' : 'end';
+    const row = rows[bar.bottom];
+    const startsEarlier = row.type === 'episode' && row.time === null; // runs off the bottom
+    const isStart = i === bar.bottom && !startsEarlier;
+    let segment: Segment = isStart ? 'start' : 'through';
+    if (i === bar.top && bar.ending === 'now') segment = 'now';
+    else if (i === bar.top && bar.ending === 'ended') segment = isStart ? 'start-end' : 'end';
     cells[bar.lane].push([bar, segment]);
   }
   return cells;
@@ -234,16 +258,16 @@ interface TimelineProps {
 }
 
 /**
- * The day's entries, newest first, with each start/stop episode drawn as a bar beside the rows it spans.
- * Tapping an entry opens a row to change its time or note, or delete it; tapping a check-in shows its answers.
+ * The day's entries, newest first, with each start/stop episode as one row and a bar beside what happened
+ * while it lasted. Tapping a row opens it for editing; tapping a check-in shows its answers.
  */
 function DayTimeline(props: TimelineProps) {
   const { bounds, entries, episodes, openEntryId, openCheckin, onToggleEntry, onToggleCheckin, onCloseEntry } = props;
   const data = useData();
-  const rows = buildRows(data, entries, episodes, bounds, openCheckin);
-  const { bars, lanes } = layOutBars(rows, entries, episodes);
+  const rows = buildRows(data, entries, episodes, bounds, Date.now(), openCheckin);
+  const { bars, lanes } = layOutBars(rows, episodes, bounds);
 
-  if (!rows.length) {
+  if (rows.every(row => row.type === 'now')) {
     return (
       <ul className="day-log" id="day-log" data-lanes={0}>
         <li>
@@ -255,22 +279,36 @@ function DayTimeline(props: TimelineProps) {
     );
   }
 
+  // A time is shown once, on the newest of the rows that share it.
+  let lastTime = '';
+  const timeLabel = (row: Row) => {
+    if (row.type === 'gap' || row.type === 'now') {
+      lastTime = '';
+      return '';
+    }
+    const label = row.time === null || (row.type === 'entry' && row.nested) ? '' : formatTime(row.time);
+    if (!label || label === lastTime) return '';
+    return (lastTime = label);
+  };
+
   return (
     <ul className="day-log" id="day-log" data-lanes={lanes} style={{ '--lanes': lanes } as CSSProperties}>
       {rows.map((row, i) => {
-        const cells = segmentsAt(i, row, bars, lanes);
+        const cells = segmentsAt(i, rows, bars, lanes);
+        const time = timeLabel(row);
         switch (row.type) {
+          case 'now':
+            return (
+              <li key={row.key} className="day-row day-now">
+                <span className="entry-time mono">Now</span>
+                <span className="row-body"><span className="now-line" /></span>
+                <Lanes cells={cells} />
+              </li>
+            );
           case 'gap':
             return (
               <li key={row.key} className="day-row day-gap">
                 <span className="row-body">{formatDuration(row.ms)}</span>
-                <Lanes cells={cells} />
-              </li>
-            );
-          case 'edge':
-            return (
-              <li key={row.key} className="day-row day-edge">
-                <EdgeRow row={row} bounds={bounds} />
                 <Lanes cells={cells} />
               </li>
             );
@@ -279,7 +317,7 @@ function DayTimeline(props: TimelineProps) {
             return (
               <li key={row.key} className="day-row">
                 <button type="button" className="entry-row is-checkin" aria-expanded={isOpen} onClick={() => onToggleCheckin(row.key)}>
-                  <span className="entry-time mono">{formatTime(row.time)}</span>
+                  <span className="entry-time mono">{time}</span>
                   <span className="row-body">
                     <span className="entry-marker is-answer" style={colorStyle('slate')} />
                     <span className="entry-text">{checkinSummary(data, row.answers)}</span>
@@ -289,22 +327,43 @@ function DayTimeline(props: TimelineProps) {
               </li>
             );
           }
+          case 'episode': {
+            const { episode } = row;
+            const tracker = data.trackers.get(episode.trackerId)!;
+            const notes = [episode.id, episode.endEntryId].map(id => (id ? data.entries.get(id)?.note : null)).filter(Boolean);
+            const isOpen = openEntryId === episode.id;
+            return (
+              <li key={row.key} className="day-row">
+                <button type="button" className="entry-row is-episode" aria-expanded={isOpen} onClick={() => onToggleEntry(episode.id)}>
+                  <span className="entry-time mono">{time}</span>
+                  <span className="row-body">
+                    <span className="entry-marker" style={colorStyle(tracker.color)} />
+                    <span className="entry-text">
+                      {episodeText(episode, tracker.name, bounds)}
+                      {notes.length > 0 && <span className="entry-note">{notes.join(' · ')}</span>}
+                    </span>
+                  </span>
+                </button>
+                <Lanes cells={cells} />
+                {isOpen && <EpisodeEditor episode={episode} onDone={onCloseEntry} />}
+                {isOpen && <Lanes cells={cells} below />}
+              </li>
+            );
+          }
           case 'entry': {
             const { entry } = row;
             const tracker = data.trackers.get(entry.tracker_id)!;
-            const episode = entry.kind === 'end' ? episodes.find(e => e.endEntryId === entry.id) : undefined;
-            const description = entryText(entry, tracker) + (episode ? ` · ${formatDuration(episode.end - episode.start)}` : '');
             // Marker shape: dot for start/stop, diamond for moments, rounded square for check-in answers.
             const marker = entry.kind === 'moment' ? ' is-moment' : entry.kind === 'answer' ? ' is-answer' : '';
             const isOpen = openEntryId === entry.id;
             return (
               <li key={row.key} className={row.nested ? 'day-row is-nested' : 'day-row'}>
                 <button type="button" className="entry-row" aria-expanded={isOpen} onClick={() => onToggleEntry(entry.id)}>
-                  <span className="entry-time mono">{row.nested ? '' : formatTime(row.time)}</span>
+                  <span className="entry-time mono">{time}</span>
                   <span className="row-body">
                     <span className={'entry-marker' + marker} style={colorStyle(tracker.color)} />
                     <span className="entry-text">
-                      {description}
+                      {entryText(entry, tracker)}
                       {entry.note && <span className="entry-note">{entry.note}</span>}
                     </span>
                   </span>
@@ -333,25 +392,60 @@ function checkinSummary(data: Data, answers: Entry[]): string {
   return `Check-in · ${shown}${parts.length > 2 ? ` +${parts.length - 2} more` : ''}`;
 }
 
-/** An episode running past the top of the day (still going, or ended later) or in from the bottom (began earlier). */
-function EdgeRow({ row, bounds }: { row: Extract<Row, { type: 'edge' }>; bounds: DayBounds }) {
-  const data = useData();
-  const { episode } = row;
-  const tracker = data.trackers.get(episode.trackerId)!;
+/**
+ * "Tired · until 7:20 PM · 45 min", "Headache · 25 min so far", or for one that began on an earlier day,
+ * "Tired · since Mon, Nov 10 10:00 PM · until 7:00 AM · 9 h 00 min".
+ */
+function episodeText(episode: Episode, name: string, bounds: DayBounds): string {
   const now = Date.now();
-  const runningToday = episode.status === 'ongoing' && now >= bounds.from && now < bounds.to;
-  const text = row.at === 'bottom' ? `${tracker.name}, since ${startedAt(episode.start)}`
-    : runningToday ? `${tracker.name} · ${formatDuration(now - episode.start)} so far`
-    : episode.status === 'ongoing' ? `${tracker.name}, still going`
-    : `${tracker.name}, until ${startedAt(episode.end)}`;
+  const parts = [name];
+  if (episode.start < bounds.from) parts.push(`since ${startedAt(episode.start)}`);
+  if (episode.status !== 'ongoing') {
+    parts.push(`until ${episode.end < bounds.to ? formatTime(episode.end) : startedAt(episode.end)}`);
+    parts.push(formatDuration(episode.end - episode.start));
+  } else if (now >= bounds.from && now < bounds.to) {
+    parts.push(`${formatDuration(now - episode.start)} so far`);
+  } else {
+    parts.push('still going');
+  }
+  return parts.join(' · ');
+}
+
+/** An episode's start and end times, each on its own day, and its note; or delete the whole episode. */
+function EpisodeEditor({ episode, onDone }: { episode: Episode; onDone: () => void }) {
+  const data = useData();
+  const startNote = data.entries.get(episode.id)?.note;
+  const [start, setStart] = useState(() => clockTime(episode.start));
+  const [end, setEnd] = useState(() => (episode.endEntryId ? clockTime(episode.end) : ''));
+  const [note, setNote] = useState(startNote || '');
+
+  const save = async () => {
+    if (await editEpisode(episode.id, start, note, episode.endEntryId, end)) onDone();
+  };
+  const remove = () => {
+    onDone();
+    deleteEpisode(episode.id, episode.endEntryId);
+  };
+
   return (
-    <>
-      <span className="entry-time mono">{runningToday ? 'Now' : ''}</span>
-      <span className="row-body">
-        <span className="entry-marker" style={colorStyle(tracker.color)} />
-        <span className="entry-text">{text}</span>
-      </span>
-    </>
+    <div className="entry-editor">
+      <label className="field">
+        Start
+        <input type="time" value={start} onChange={e => setStart(e.target.value)} />
+      </label>
+      {episode.endEntryId && (
+        <label className="field">
+          End
+          <input type="time" value={end} onChange={e => setEnd(e.target.value)} />
+        </label>
+      )}
+      <label className="field note-field">
+        Note
+        <input type="text" value={note} placeholder="Optional" onChange={e => setNote(e.target.value)} />
+      </label>
+      <button type="button" className="button primary" data-save-entry={episode.id} onClick={save}>Save</button>
+      <button type="button" className="button danger" onClick={remove}>Delete</button>
+    </div>
   );
 }
 

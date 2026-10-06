@@ -379,9 +379,14 @@ def test_moments_and_the_days_log(phone1):
     phone1.locator('.moment-button', has_text='Coffee').click()
     log = phone1.locator('#day-log')
     expect(log).to_contain_text('Coffee')
-    expect(log).to_contain_text('Tired ended')
+    expect(log).to_contain_text('Tired · until')  # one row for the whole episode
     expect(log).to_contain_text('Headache: Moderate')
     expect(phone1.locator('#day-log')).to_have_attribute('data-lanes', '2')  # Tired and Headache overlapped
+    expect(phone1.locator('#day-log > li').first).to_have_class('day-row day-now')
+    expect(phone1.locator('#day-log .lane-bar.is-now')).to_have_count(1)  # Headache, still going, reaches Now
+    expect(phone1.locator('#day-log .lane-bar.is-end, #day-log .lane-bar.is-start-end')).to_have_count(1)  # Tired's ring
+    shown_times = [t for t in phone1.locator('#day-log .entry-time').all_inner_texts() if t.strip()]
+    assert len(shown_times) == len(set(shown_times))  # each time once, on the newest row that has it
     expect(phone1.locator('.day-totals')).to_contain_text('Tired 1×')
     expect(phone1.locator('.day-totals')).to_contain_text('Coffee 1×')
 
@@ -763,12 +768,93 @@ def test_day_timeline_shows_gaps_and_overnight_episodes(browser, supabase):
     expect(phone.locator('.day-name')).to_contain_text('Tue, Nov 11')
 
     rows = phone.locator('#day-log > li')
-    expect(rows).to_have_count(6)
-    assert [rows.nth(i).inner_text().replace('\n', ' ') for i in range(6)] == [
-        '11:30 AM Coffee', '3 h 30 min', '8:00 AM Coffee', '1 h 00 min', '7:00 AM Tired ended · 9 h 00 min',
-        'Tired, since Mon, Nov 10 10:00 PM']
+    expect(rows).to_have_count(4)
+    assert [rows.nth(i).inner_text().replace('\n', ' ') for i in range(4)] == [
+        '11:30 AM Coffee', '3 h 30 min', '8:00 AM Coffee', 'Tired · since Mon, Nov 10 10:00 PM · until 7:00 AM · 9 h 00 min']
     expect(phone.locator('#day-log')).to_have_attribute('data-lanes', '1')
     expect(phone.locator('.day-totals')).to_contain_text('Tired 1× · 7 h 00 min')  # the part on this day
+
+    # The episode's row edits its start and end together, and deletes both.
+    phone.locator('.entry-row.is-episode').click()
+    expect(phone.locator('.entry-editor')).to_contain_text('Start')
+    expect(phone.locator('.entry-editor')).to_contain_text('End')
+    phone.locator('.entry-editor .button.danger').click()
+    expect(phone.locator('#day-log')).not_to_contain_text('Tired')
+    expect(phone.locator('.day-totals')).not_to_contain_text('Tired')
+
+
+def test_day_timeline_never_draws_two_bars_in_one_lane(browser, supabase):
+    def tracker(n, name, type_, color):
+        return {'id': f'00000000-0000-4000-8000-0000000000e{n}', 'name': name, 'type': type_, 'group_name': None,
+                'color': color, 'config': {}, 'sort_order': n * 10, 'archived': False}
+    headache, tired, anxious, coffee = (tracker(1, 'Headache', 'episode', 'amber'), tracker(2, 'Tired', 'episode', 'indigo'),
+                                        tracker(3, 'Anxious', 'episode', 'teal'), tracker(4, 'Coffee', 'moment', 'amber'))
+    def entry(n, of, kind, utc):
+        return {'id': f'00000000-0000-4000-9000-0000000000e{n}', 'tracker_id': of['id'], 'kind': kind, 'occurred_at': utc,
+                'value': None, 'text': None, 'note': None, 'checkin_id': None, 'deleted': False}
+    entries = [  # Nov 12, 2025, New York: Anxious starts and ends in the row where Headache's bar stops
+        entry(1, headache, 'start', '2025-11-12T14:04:00.000Z'),
+        entry(2, tired, 'start', '2025-11-12T14:23:00.000Z'),
+        entry(3, tired, 'end', '2025-11-12T14:24:00.000Z'),
+        entry(4, coffee, 'moment', '2025-11-12T14:24:30.000Z'),
+        entry(5, anxious, 'start', '2025-11-12T14:25:10.000Z'),
+        entry(6, anxious, 'end', '2025-11-12T14:25:20.000Z'),
+        entry(7, headache, 'end', '2025-11-12T14:25:30.000Z'),
+    ]
+    phone = Phone(browser, supabase, timezone='America/New_York')
+    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [headache, tired, anxious, coffee], 'entries': entries})
+    phone.open()
+    phone.page.click('#previous-day')
+    expect(phone.locator('.day-name')).to_contain_text('Wed, Nov 12')
+    expect(phone.locator('#day-log')).to_have_attribute('data-lanes', '2')
+    bars_per_cell = phone.locator('#day-log .lane').evaluate_all('lanes => lanes.map(lane => lane.children.length)')
+    assert max(bars_per_cell) == 1
+
+
+def test_ended_episode_stops_below_now(browser, supabase):
+    # Ended ten minutes after the last thing logged: its bar must end in a ring, not run up to Now like a running one.
+    headache = {'id': '00000000-0000-4000-8000-0000000000f1', 'name': 'Headache', 'type': 'episode', 'group_name': None,
+                'color': 'amber', 'config': {}, 'sort_order': 10, 'archived': False}
+    coffee = {**headache, 'id': '00000000-0000-4000-8000-0000000000f2', 'name': 'Coffee', 'type': 'moment'}
+    phone = Phone(browser, supabase)
+    now = phone.page.evaluate('Date.now()')
+    def entry(n, of, kind, minutes_ago):
+        utc = phone.page.evaluate(f'new Date({now} - {minutes_ago} * 60000).toISOString()')
+        return {'id': f'00000000-0000-4000-9000-0000000000f{n}', 'tracker_id': of['id'], 'kind': kind, 'occurred_at': utc,
+                'value': None, 'text': None, 'note': None, 'checkin_id': None, 'deleted': False}
+    entries = [entry(1, headache, 'start', 30), entry(2, coffee, 'moment', 20), entry(3, headache, 'end', 10)]
+    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [headache, coffee], 'entries': entries})
+    phone.open()
+    rows = phone.locator('#day-log > li')
+    expect(rows.first).to_have_class('day-row day-now')
+    expect(phone.locator('#day-log .lane-bar.is-now')).to_have_count(0)
+    expect(rows.nth(1).locator('.lane-bar.is-end')).to_have_count(1)  # the ring, beside Coffee
+
+
+def test_moving_an_episode_earlier_keeps_it_whole(browser, supabase):
+    phone = Phone(browser, supabase)
+    pain = phone.locator('.episode-card .episode-button', has_text='Pain')
+    running = phone.locator('#running')
+    # Started and stopped at once, then −15 on the "ended" toast: it would end before it started, so the
+    # whole episode moves back instead of Pain coming back on.
+    pain.click()
+    expect(running).to_contain_text('Pain')
+    pain.click()
+    expect(running).not_to_contain_text('Pain')
+    phone.locator('.toast button', has_text='15').click()
+    expect(phone.locator('.toast')).to_contain_text('Moved Pain to')
+    expect(running).not_to_contain_text('Pain')
+    expect(phone.locator('#day-log')).to_contain_text('Pain · until')
+    expect(phone.locator('#day-log')).not_to_contain_text('Pain ended')
+
+    # Started again: one −15 is fine, a second would overlap the first episode, so it's refused.
+    pain.click()
+    phone.locator('.toast button', has_text='15').click()
+    expect(phone.locator('.toast')).to_contain_text('Moved to')
+    phone.locator('.toast button', has_text='15').click()
+    expect(phone.locator('.toast')).to_contain_text('That would overlap another Pain.')
+    expect(running).to_contain_text('Pain')
+    expect(phone.locator('#day-log .entry-row.is-episode', has_text='Pain')).to_have_count(2)
 
 
 def test_day_when_the_clocks_go_back_has_25_hours(browser, supabase):

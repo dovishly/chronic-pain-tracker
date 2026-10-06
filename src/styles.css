@@ -722,6 +722,7 @@ textarea {
 .day-row:first-child .row-body,
 .day-gap .row-body,
 .day-gap + .day-row .row-body,
+.day-now + .day-row .row-body,
 .day-row.is-nested .row-body {
   border-top: 0;
 }
@@ -738,8 +739,23 @@ textarea {
   color: var(--muted);
 }
 
-.day-edge .entry-text {
-  color: var(--muted);
+/* "Now", with a line across, like a calendar's: running episodes' bars reach up to it. */
+.day-now .entry-time {
+  padding-block: 4px;
+  font-weight: 700;
+}
+
+.day-now .row-body {
+  display: block;
+  align-self: center;
+  padding: 0;
+}
+
+.now-line {
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--muted);
 }
 
 .day-log .empty-note {
@@ -775,25 +791,30 @@ textarea {
   bottom: 0;
 }
 
-/* Newest at the top, so a bar starts at its start row and goes up. */
-.lane-bar.is-start {
+/* Newest at the top, so a bar starts at its dot and goes up. */
+.lane-bar.is-start,
+.lane-bar.is-start-end {
   top: 0;
   bottom: 50%;
 }
 
+/* Ended: a ring at the row's top edge, after the last thing logged while it lasted. */
 .lane-bar.is-end {
-  top: 50%;
+  top: 0;
   bottom: 0;
 }
 
-.lane-bar.is-dot {
+/* Still going: up to the Now line. */
+.lane-bar.is-now {
   top: 50%;
-  height: 0;
+  bottom: 0;
+  border-radius: 2px 2px 0 0;
 }
 
 .lane-bar.is-start::after,
-.lane-bar.is-end::after,
-.lane-bar.is-dot::after {
+.lane-bar.is-start-end::after,
+.lane-bar.is-end::before,
+.lane-bar.is-start-end::before {
   content: "";
   position: absolute;
   left: 50%;
@@ -801,16 +822,20 @@ textarea {
   height: 10px;
   margin-left: -5px;
   border-radius: 50%;
+}
+
+.lane-bar.is-start::after,
+.lane-bar.is-start-end::after {
+  bottom: -5px;
   background: var(--c);
 }
 
-.lane-bar.is-start::after {
-  bottom: -5px;
-}
-
-.lane-bar.is-end::after,
-.lane-bar.is-dot::after {
+.lane-bar.is-end::before,
+.lane-bar.is-start-end::before {
   top: -5px;
+  box-sizing: border-box;
+  border: 2px solid var(--c);
+  background: var(--surface);
 }
 
 /* Dot for start/stop, diamond for moments, rounded square for check-in answers. */

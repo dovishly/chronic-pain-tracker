@@ -1,7 +1,7 @@
 import { MINUTE_MS, formatTime, formatDuration, uuid, unhandled } from './util';
 import { dataStore } from './data';
 import {
-  CHECKIN_TYPES, newEntry, entryTime, sortedTrackers, groupName, levelLabel, activeEpisodes,
+  CHECKIN_TYPES, newEntry, entryTime, sortedTrackers, groupName, levelLabel, activeEpisodes, allEpisodes, liveEntries,
   type Entry, type EntryKind, type Tracker,
 } from './model';
 import { addStarterTrackers, eraseDevice, saveEntries, saveEntry, saveTracker } from './store';
@@ -51,12 +51,47 @@ export const logMoment = safely(async (trackerId: string) => {
   toast(`${tracker.name} at ${formatTime(entryTime(entry))}`, entry.id);
 });
 
+const movedBy = (entry: Entry, ms: number): Entry => ({ ...entry, occurred_at: new Date(entryTime(entry) - ms).toISOString() });
+
+/**
+ * True if an episode spanning start to end (null: still going) would take in another start or end of the
+ * same tracker, which would pair them up differently. ids are the episode's own start and end.
+ */
+function overlapsAnother(trackerId: string, ids: (string | undefined)[], start: number, end: number | null): boolean {
+  return liveEntries(data()).some(e => e.tracker_id === trackerId && (e.kind === 'start' || e.kind === 'end')
+    && !ids.includes(e.id) && entryTime(e) >= start && (end === null || entryTime(e) < end));
+}
+
+/**
+ * The toast's −5 and −15 min. An episode's end that would land before its start moves the whole episode
+ * instead; a move that would overlap another episode of the same tracker is refused.
+ */
 export const moveEntryEarlier = safely(async (id: string, minutes: number) => {
   const entry = data().entries.get(id);
   if (!entry) return;
-  const newTime = entryTime(entry) - minutes * MINUTE_MS;
-  await changeEntry(id, { occurred_at: new Date(newTime).toISOString() });
-  toast(`Moved to ${formatTime(newTime)}`, id);
+  const ms = minutes * MINUTE_MS;
+  let moved = [movedBy(entry, ms)];
+  let message = `Moved to ${formatTime(entryTime(moved[0]))}`;
+
+  const episode = allEpisodes(data()).find(e => e.id === id || e.endEntryId === id);
+  if (episode) {
+    const name = trackerById(entry.tracker_id).name;
+    const start = data().entries.get(episode.id)!;
+    let from = entry.kind === 'start' ? entryTime(moved[0]) : episode.start;
+    let to: number | null = entry.kind === 'end' ? entryTime(moved[0]) : episode.status === 'ongoing' ? null : episode.end;
+    if (entry.kind === 'end' && to! <= episode.start) {
+      moved = [movedBy(start, ms), moved[0]];
+      from = entryTime(moved[0]);
+      to = entryTime(moved[1]);
+      message = `Moved ${name} to ${formatTime(from)}–${formatTime(to)}`;
+    }
+    if (overlapsAnother(entry.tracker_id, [episode.id, episode.endEntryId], from, to)) {
+      toast(`That would overlap another ${name}.`, id);
+      return;
+    }
+  }
+  await saveEntries(moved);
+  toast(message, id);
 });
 
 export const deleteEntry = safely(async (id: string, message: string) => {
@@ -64,18 +99,47 @@ export const deleteEntry = safely(async (id: string, message: string) => {
   toast(message);
 });
 
+/** The entry at "HH:MM" on its own day ("" keeps its time). */
+function atTime(entry: Entry, time: string): Entry {
+  if (!time) return entry;
+  const [hours, minutes] = time.split(':').map(Number);
+  const when = new Date(entryTime(entry));
+  when.setHours(hours, minutes, 0, 0);
+  return { ...entry, occurred_at: when.toISOString() };
+}
+
 /** time is "HH:MM" on the entry's day, or "" to keep it. */
 export const editEntry = safely(async (id: string, time: string, note: string) => {
   const entry = data().entries.get(id);
-  if (!entry) return;
-  const changes: Partial<Entry> = { note: note.trim() || null };
-  if (time) {
-    const [hours, minutes] = time.split(':').map(Number);
-    const when = new Date(entryTime(entry));
-    when.setHours(hours, minutes, 0, 0);
-    changes.occurred_at = when.toISOString();
+  if (entry) await saveEntry({ ...atTime(entry, time), note: note.trim() || null });
+});
+
+/** An episode's start and end times ("HH:MM", each on its own day) and its note, which is the start's. */
+export const editEpisode = safely(async (startId: string, startTime: string, note: string, endId?: string, endTime: string = '') => {
+  const start = data().entries.get(startId);
+  if (!start) return false;
+  const end = endId ? data().entries.get(endId) : undefined;
+  const changed = [{ ...atTime(start, startTime), note: note.trim() || null }];
+  if (end) changed.push(atTime(end, endTime));
+  if (end && entryTime(changed[1]) <= entryTime(changed[0])) {
+    toast('The end has to be after the start.');
+    return false;
   }
-  await changeEntry(id, changes);
+  const episode = allEpisodes(data()).find(e => e.id === startId);
+  const until = end ? entryTime(changed[1]) : episode?.status === 'ongoing' ? null : episode?.end ?? null;
+  if (overlapsAnother(start.tracker_id, [startId, endId], entryTime(changed[0]), until)) {
+    toast(`That would overlap another ${trackerById(start.tracker_id).name}.`);
+    return false;
+  }
+  await saveEntries(changed);
+  return true;
+});
+
+/** Deletes an episode: its start and, if it has one, its end. */
+export const deleteEpisode = safely(async (startId: string, endId?: string) => {
+  const both = [startId, endId].map(id => (id ? data().entries.get(id) : undefined)).filter((e): e is Entry => !!e);
+  await saveEntries(both.map(e => ({ ...e, deleted: true })));
+  toast('Deleted');
 });
 
 /* ---------- check-in ---------- */
