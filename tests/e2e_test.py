@@ -381,7 +381,9 @@ def test_moments_and_the_days_log(phone1):
     expect(log).to_contain_text('Coffee')
     expect(log).to_contain_text('Tired ended')
     expect(log).to_contain_text('Headache: Moderate')
-    assert phone1.locator('.timeline-row').count() >= 2
+    expect(phone1.locator('#day-log')).to_have_attribute('data-lanes', '2')  # Tired and Headache overlapped
+    expect(phone1.locator('.day-totals')).to_contain_text('Tired 1×')
+    expect(phone1.locator('.day-totals')).to_contain_text('Coffee 1×')
 
 
 def test_toast_undo(phone1):
@@ -417,6 +419,10 @@ def test_check_in(phone1):
     phone1.screenshot('checkin-light')
 
     phone1.page.click('#save-checkin')  # saves and goes back to Today
+    checkin = phone1.locator('.entry-row.is-checkin')
+    expect(checkin).to_have_count(1)  # one row for the whole check-in
+    expect(checkin).to_contain_text('Check-in · Mood: Good, Water: 3 glasses +2 more')
+    checkin.click()  # shows each answer
     log = phone1.locator('#day-log')
     for text in ['Mood: Good', 'Activities: Exercise', 'Activities: Friends', 'Water: 3 glasses', 'Journal: Felt okay']:
         expect(log).to_contain_text(text)
@@ -735,6 +741,34 @@ def test_reset_everywhere(phone1, phone3, supabase):
 def test_no_sideways_scrolling(phone1, phone2, phone3):
     for phone in [phone1, phone2, phone3]:
         assert phone.page.evaluate('document.documentElement.scrollWidth') <= 390
+
+
+def test_day_timeline_shows_gaps_and_overnight_episodes(browser, supabase):
+    tired = {'id': '00000000-0000-4000-8000-0000000000d1', 'name': 'Tired', 'type': 'episode', 'group_name': 'Symptoms',
+             'color': 'indigo', 'config': {}, 'sort_order': 10, 'archived': False}
+    coffee = {**tired, 'id': '00000000-0000-4000-8000-0000000000d2', 'name': 'Coffee', 'type': 'moment', 'color': 'amber'}
+    def entry(n, tracker, kind, utc):
+        return {'id': f'00000000-0000-4000-9000-0000000000d{n}', 'tracker_id': tracker['id'], 'kind': kind, 'occurred_at': utc,
+                'value': None, 'text': None, 'note': None, 'checkin_id': None, 'deleted': False}
+    entries = [  # New York times, November 2025 (UTC-5)
+        entry(1, tired, 'start', '2025-11-11T03:00:00.000Z'),   # Nov 10, 22:00
+        entry(2, tired, 'end', '2025-11-11T12:00:00.000Z'),     # Nov 11, 07:00
+        entry(3, coffee, 'moment', '2025-11-11T13:00:00.000Z'),  # Nov 11, 08:00
+        entry(4, coffee, 'moment', '2025-11-11T16:30:00.000Z'),  # Nov 11, 11:30
+    ]
+    phone = Phone(browser, supabase, timezone='America/New_York')
+    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [tired, coffee], 'entries': entries})
+    phone.open()
+    phone.page.click('#previous-day')
+    expect(phone.locator('.day-name')).to_contain_text('Tue, Nov 11')
+
+    rows = phone.locator('#day-log > li')
+    expect(rows).to_have_count(6)
+    assert [rows.nth(i).inner_text().replace('\n', ' ') for i in range(6)] == [
+        '11:30 AM Coffee', '3 h 30 min', '8:00 AM Coffee', '1 h 00 min', '7:00 AM Tired ended · 9 h 00 min',
+        'Tired, since Mon, Nov 10 10:00 PM']
+    expect(phone.locator('#day-log')).to_have_attribute('data-lanes', '1')
+    expect(phone.locator('.day-totals')).to_contain_text('Tired 1× · 7 h 00 min')  # the part on this day
 
 
 def test_day_when_the_clocks_go_back_has_25_hours(browser, supabase):

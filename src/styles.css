@@ -628,7 +628,7 @@ textarea {
   color: var(--on);
 }
 
-/* ===================== Today: one day (navigation, timeline, log) ===================== */
+/* ===================== Today: one day ===================== */
 
 .day-section .panel {
   margin-top: 10px;
@@ -646,134 +646,171 @@ textarea {
   text-align: center;
 }
 
-/* ===================== Today: timeline ===================== */
+/* ===================== Today: the day's timeline ===================== */
 
-.timeline {
+.day-totals {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: .85rem;
+  color: var(--muted);
+}
+
+.day-total {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
 }
 
-/* Label on the left, a day-long track on the right. */
-.timeline-row,
-.timeline-axis {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 10px;
-}
-
-.timeline-row {
-  align-items: center;
-}
-
-.timeline-label {
-  font-size: .82rem;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.timeline-total {
-  display: block;
-  font-weight: 400;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: .74rem;
-}
-
-.timeline-track {
-  position: relative;
-  height: 18px;
-  background: color-mix(in srgb, var(--line) 45%, transparent);
-  border-radius: 4px;
-}
-
-.timeline-span {
-  position: absolute;
-  top: 0;
-  bottom: 0;
+.day-total::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   background: var(--c);
-  border-radius: 3px;
-  min-width: 3px;
 }
 
-.timeline-moment {
-  position: absolute;
-  top: -2px;
-  bottom: -2px;
-  width: 3px;
-  margin-left: -1px;
-  background: var(--c);
-  border-radius: 2px;
-}
-
-.timeline-now {
-  position: absolute;
-  top: -4px;
-  bottom: -4px;
-  width: 0;
-  border-left: 2px dashed var(--muted);
-}
-
-.timeline-hours {
-  position: relative;
-  height: 16px;
-  font-size: .72rem;
-  color: var(--muted);
-}
-
-.timeline-hours span {
-  position: absolute;
-  transform: translateX(-50%);
-}
-
-.timeline-hours span:first-child {
-  transform: none;
-}
-
-.timeline-hours span:last-child {
-  transform: translateX(-100%);
-}
-
-/* ===================== Today: entry log ===================== */
-
-.entry-log {
+/* Each row: the time, a lane per overlapping episode (--lanes of them), then marker and text. The bars are
+   drawn over the row's button without blocking taps, and meet the bars in the rows above and below. */
+.day-log {
+  --lane: 12px;
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
 }
 
-.entry-log li {
-  border-top: 1px solid var(--line);
+.day-row {
+  display: grid;
+  grid-template-columns: 72px calc(var(--lanes, 0) * var(--lane)) minmax(0, 1fr);
+  column-gap: 8px;
 }
 
-.entry-log li:first-child {
-  border-top: 0;
-}
-
-.entry-log .empty-note {
-  padding: 6px 2px;
-}
-
-/* Time, marker, description. */
 .entry-row {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
   width: 100%;
   border: 0;
   background: none;
   text-align: left;
-  display: grid;
-  grid-template-columns: 72px 12px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  padding: 10px 2px;
+  padding: 0;
 }
 
 .entry-time {
+  grid-column: 1;
+  grid-row: 1;
+  padding: 10px 0 10px 2px;
   color: var(--muted);
   font-size: .9rem;
+}
+
+/* Marker and description, with a separator above (inset, so it doesn't cross the bars). */
+.row-body {
+  grid-column: 3;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  align-self: stretch;
+  padding: 10px 2px 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.day-row:first-child .row-body,
+.day-gap .row-body,
+.day-gap + .day-row .row-body,
+.day-row.is-nested .row-body {
+  border-top: 0;
+}
+
+.day-row.is-nested .row-body {
+  padding-top: 4px;
+  padding-left: 14px;
+}
+
+.day-gap .row-body {
+  display: block;
+  padding: 2px 0;
+  font-size: .78rem;
+  color: var(--muted);
+}
+
+.day-edge .entry-text {
+  color: var(--muted);
+}
+
+.day-log .empty-note {
+  padding: 6px 2px;
+}
+
+.lanes {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  pointer-events: none;
+}
+
+.lanes.is-below {
+  grid-row: 2;
+}
+
+.lane {
+  position: relative;
+  width: var(--lane);
+}
+
+.lane-bar {
+  position: absolute;
+  left: 50%;
+  width: 4px;
+  margin-left: -2px;
+  background: var(--c);
+}
+
+.lane-bar.is-through {
+  top: 0;
+  bottom: 0;
+}
+
+/* Newest at the top, so a bar starts at its start row and goes up. */
+.lane-bar.is-start {
+  top: 0;
+  bottom: 50%;
+}
+
+.lane-bar.is-end {
+  top: 50%;
+  bottom: 0;
+}
+
+.lane-bar.is-dot {
+  top: 50%;
+  height: 0;
+}
+
+.lane-bar.is-start::after,
+.lane-bar.is-end::after,
+.lane-bar.is-dot::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--c);
+}
+
+.lane-bar.is-start::after {
+  bottom: -5px;
+}
+
+.lane-bar.is-end::after,
+.lane-bar.is-dot::after {
+  top: -5px;
 }
 
 /* Dot for start/stop, diamond for moments, rounded square for check-in answers. */
@@ -804,23 +841,19 @@ textarea {
   font-size: .85rem;
 }
 
-/* Lines up under the description on wide screens. */
+/* Under the description, beside the bars. */
 .entry-editor {
+  grid-column: 3;
+  grid-row: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: end;
-  padding: 4px 2px 14px 94px;
+  padding: 4px 2px 14px 22px;
 }
 
 .entry-editor .note-field {
-  flex: 1 1 180px;
-}
-
-@media (max-width: 480px) {
-  .entry-editor {
-    padding-left: 2px;
-  }
+  flex: 1 1 140px;
 }
 
 /* ===================== Check in ===================== */

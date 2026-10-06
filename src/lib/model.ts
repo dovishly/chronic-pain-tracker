@@ -308,12 +308,3 @@ export function allEpisodes(data: Data): Episode[] {
   for (const startEntry of Object.values(openStarts)) close(startEntry, Date.now(), 'ongoing');
   return episodes.sort((a, b) => a.start - b.start);
 }
-
-/** Episodes keyed by the id of their end entry, for showing durations next to "ended" entries. */
-export function episodesByEndEntry(data: Data): Record<string, Episode> {
-  const byEnd: Record<string, Episode> = {};
-  for (const episode of allEpisodes(data)) {
-    if (episode.endEntryId) byEnd[episode.endEntryId] = episode;
-  }
-  return byEnd;
-}
