@@ -23,28 +23,28 @@ export interface Tracker {
   id: string;
   name: string;
   type: TrackerType;
-  grp: string | null;     // group heading; null or '' means "Other"
+  group_name: string | null; // heading the tracker is listed under; null or '' means "Other"
   color: string;          // one of COLORS
   config: TrackerConfig;
-  sort: number;
+  sort_order: number;
   archived: boolean;
   updated_at?: string;    // set on every local write; replaced by the server's on sync
 }
 
 /**
- * start/end: an episode began or stopped. level: severity during an episode (num + label in txt).
- * moment: a one-tap moment. value: a check-in answer.
+ * start/end: an episode began or stopped. level: severity during an episode (value, with its label in text).
+ * moment: a one-tap moment. answer: a check-in answer.
  */
-export const ENTRY_KINDS = ['start', 'end', 'level', 'moment', 'value'] as const;
+export const ENTRY_KINDS = ['start', 'end', 'level', 'moment', 'answer'] as const;
 export type EntryKind = (typeof ENTRY_KINDS)[number];
 
 export interface Entry {
   id: string;
   tracker_id: string;
-  ts: string;             // ISO timestamp of when it happened
+  occurred_at: string;    // ISO timestamp of when it happened
   kind: EntryKind;
-  num: number | null;
-  txt: string | null;
+  value: number | null;   // a severity level, rating level, or number
+  text: string | null;    // the level's label, a chosen option, or free text
   note: string | null;
   checkin_id: string | null; // shared by the answers saved in one check-in
   deleted: boolean;          // soft delete, so deletions sync
@@ -99,25 +99,25 @@ export function defaultConfig(type: TrackerType): TrackerConfig {
   }
 }
 
-type StarterTracker = Pick<Tracker, 'name' | 'type' | 'grp' | 'color' | 'config'>;
+type StarterTracker = Pick<Tracker, 'name' | 'type' | 'group_name' | 'color' | 'config'>;
 
 /** Generic trackers created on a fresh device that isn't connected to an account. */
 export const STARTER_TRACKERS: StarterTracker[] = [
-  { name: 'Mood', type: 'rating', grp: 'Check-in', color: 'indigo', config: { levels: ['Awful', 'Bad', 'Okay', 'Good', 'Great'] } },
-  { name: 'Energy', type: 'rating', grp: 'Check-in', color: 'amber', config: { levels: ['Very low', 'Low', 'Okay', 'Good', 'High'] } },
-  { name: 'Stress', type: 'rating', grp: 'Check-in', color: 'rose', config: { levels: ['None', 'Low', 'Moderate', 'High', 'Overwhelmed'] } },
-  { name: 'Sleep quality', type: 'rating', grp: 'Check-in', color: 'violet', config: { levels: ['Very poor', 'Poor', 'Okay', 'Good', 'Great'] } },
-  { name: 'Water', type: 'number', grp: 'Check-in', color: 'sky', config: { unit: 'glasses', min: 0, max: 30, step: 1 } },
-  { name: 'Activities', type: 'choice', grp: 'Check-in', color: 'green', config: { options: ['Exercise', 'Work', 'Friends', 'Family', 'Outdoors', 'Reading', 'Rest'], multi: true } },
-  { name: 'Journal', type: 'text', grp: 'Check-in', color: 'slate', config: {} },
-  { name: 'Tired', type: 'episode', grp: 'Symptoms', color: 'indigo', config: { levels: [] } },
-  { name: 'Headache', type: 'episode', grp: 'Symptoms', color: 'amber', config: { levels: ['Mild', 'Moderate', 'Severe'] } },
-  { name: 'Pain', type: 'episode', grp: 'Symptoms', color: 'amber', config: { levels: ['Mild', 'Moderate', 'Severe'] } },
-  { name: 'Anxious', type: 'episode', grp: 'Symptoms', color: 'teal', config: { levels: [] } },
-  { name: 'Low mood', type: 'episode', grp: 'Symptoms', color: 'teal', config: { levels: [] } },
-  { name: 'Medication', type: 'moment', grp: 'Moments', color: 'violet', config: {} },
-  { name: 'Coffee', type: 'moment', grp: 'Moments', color: 'amber', config: {} },
-  { name: 'Meal', type: 'moment', grp: 'Moments', color: 'green', config: {} },
+  { name: 'Mood', type: 'rating', group_name: 'Check-in', color: 'indigo', config: { levels: ['Awful', 'Bad', 'Okay', 'Good', 'Great'] } },
+  { name: 'Energy', type: 'rating', group_name: 'Check-in', color: 'amber', config: { levels: ['Very low', 'Low', 'Okay', 'Good', 'High'] } },
+  { name: 'Stress', type: 'rating', group_name: 'Check-in', color: 'rose', config: { levels: ['None', 'Low', 'Moderate', 'High', 'Overwhelmed'] } },
+  { name: 'Sleep quality', type: 'rating', group_name: 'Check-in', color: 'violet', config: { levels: ['Very poor', 'Poor', 'Okay', 'Good', 'Great'] } },
+  { name: 'Water', type: 'number', group_name: 'Check-in', color: 'sky', config: { unit: 'glasses', min: 0, max: 30, step: 1 } },
+  { name: 'Activities', type: 'choice', group_name: 'Check-in', color: 'green', config: { options: ['Exercise', 'Work', 'Friends', 'Family', 'Outdoors', 'Reading', 'Rest'], multi: true } },
+  { name: 'Journal', type: 'text', group_name: 'Check-in', color: 'slate', config: {} },
+  { name: 'Tired', type: 'episode', group_name: 'Symptoms', color: 'indigo', config: { levels: [] } },
+  { name: 'Headache', type: 'episode', group_name: 'Symptoms', color: 'amber', config: { levels: ['Mild', 'Moderate', 'Severe'] } },
+  { name: 'Pain', type: 'episode', group_name: 'Symptoms', color: 'amber', config: { levels: ['Mild', 'Moderate', 'Severe'] } },
+  { name: 'Anxious', type: 'episode', group_name: 'Symptoms', color: 'teal', config: { levels: [] } },
+  { name: 'Low mood', type: 'episode', group_name: 'Symptoms', color: 'teal', config: { levels: [] } },
+  { name: 'Medication', type: 'moment', group_name: 'Moments', color: 'violet', config: {} },
+  { name: 'Coffee', type: 'moment', group_name: 'Moments', color: 'amber', config: {} },
+  { name: 'Meal', type: 'moment', group_name: 'Moments', color: 'green', config: {} },
 ];
 
 /* ---------- data from storage or the server ---------- */
@@ -135,7 +135,7 @@ export function normalizeTracker(raw: Record<string, unknown>): Tracker {
 export function normalizeEntry(raw: Record<string, unknown>): Entry {
   const { user_id: _user, created_at: _created, ...entry } = raw;
   // Postgres numeric can arrive as a string.
-  return { ...entry, num: entry.num == null ? null : Number(entry.num) } as Entry;
+  return { ...entry, value: entry.value == null ? null : Number(entry.value) } as Entry;
 }
 
 /* ---------- entries ---------- */
@@ -145,10 +145,10 @@ export function newEntry(trackerId: string, kind: EntryKind, fields: Partial<Ent
   return {
     id: uuid(),
     tracker_id: trackerId,
-    ts: nowIso(),
+    occurred_at: nowIso(),
     kind,
-    num: null,
-    txt: null,
+    value: null,
+    text: null,
     note: null,
     checkin_id: null,
     deleted: false,
@@ -163,7 +163,7 @@ const timeCache = new WeakMap<Entry, number>();
 export function entryTime(entry: Entry): number {
   let time = timeCache.get(entry);
   if (time === undefined) {
-    time = Date.parse(entry.ts);
+    time = Date.parse(entry.occurred_at);
     timeCache.set(entry, time);
   }
   return time;
@@ -182,6 +182,9 @@ export function daysWithEntries(data: Data): string[] {
   return [...keys].sort();
 }
 
+/** A level's or answer's label, or its number when it has none. */
+export const entryLabel = (entry: Entry) => String((entry.text || entry.value) ?? '');
+
 /** One line describing an entry, e.g. "Headache: Moderate" or "Water: 3 glasses". */
 export function entryText(entry: Entry, tracker: Tracker): string {
   const name = tracker.name;
@@ -189,11 +192,11 @@ export function entryText(entry: Entry, tracker: Tracker): string {
     case 'start': return `${name} started`;
     case 'end': return `${name} ended`;
     case 'moment': return name;
-    case 'level': return `${name}: ${(entry.txt || entry.num) ?? ''}`;
-    case 'value': {
-      if (tracker.type !== 'number') return `${name}: ${(entry.txt || entry.num) ?? ''}`;
+    case 'level': return `${name}: ${entryLabel(entry)}`;
+    case 'answer': {
+      if (tracker.type !== 'number') return `${name}: ${entryLabel(entry)}`;
       const unit = tracker.config.unit ? ' ' + tracker.config.unit : '';
-      return `${name}: ${entry.num ?? ''}${unit}`;
+      return `${name}: ${entry.value ?? ''}${unit}`;
     }
     default: return unhandled(entry.kind, name);
   }
@@ -213,10 +216,13 @@ export function sortedTrackers(
   const wanted = types == null ? null : ([] as TrackerType[]).concat(types);
   return [...data.trackers.values()]
     .filter(t => (!wanted || wanted.includes(t.type)) && (includeArchived || !t.archived))
-    .sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
+    .sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
 }
 
-export const groupName = (tracker: Tracker) => tracker.grp || 'Other';
+export const groupName = (tracker: Tracker) => tracker.group_name || 'Other';
+
+/** The label of a rating or severity level (1-based), or null if the tracker has none for it. */
+export const levelLabel = (tracker: Tracker, level: number) => (tracker.config.levels || [])[level - 1] || null;
 
 /** [groupName, trackers] pairs, groups in order of first appearance. */
 export function groupTrackers(trackers: Tracker[]): [string, Tracker[]][] {
@@ -271,8 +277,8 @@ export function activeEpisodes(data: Data): Record<string, ActiveEpisode> {
     } else if (e.kind === 'end') {
       delete active[id];
     } else if (active[id]) {
-      active[id].level = e.num;
-      active[id].label = e.txt;
+      active[id].level = e.value;
+      active[id].label = e.text;
     }
   }
   for (const id of Object.keys(active)) {

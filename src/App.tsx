@@ -28,7 +28,7 @@ export function App() {
     <>
       <main className="page">
         <div className="page-header">
-          <h1 id="title">{VIEW_TITLES[view]}</h1>
+          <h1>{VIEW_TITLES[view]}</h1>
           <SyncPill onClick={() => setView('settings')} />
         </div>
         {view === 'today' && <TodayView shownDay={shownDay} onShowDay={setShownDay} />}
@@ -36,7 +36,7 @@ export function App() {
         {view === 'settings' && <SettingsView />}
       </main>
       <TabBar current={view} onSelect={selectTab} />
-      <div id="toastHost" aria-live="polite">
+      <div id="toast-host" aria-live="polite">
         <Toast />
       </div>
     </>

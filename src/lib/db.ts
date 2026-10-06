@@ -15,7 +15,7 @@ const UPGRADES: ((database: IDBDatabase, transaction: IDBTransaction) => void)[]
     database.createObjectStore('trackers', { keyPath: 'id' });
     database.createObjectStore('entries', { keyPath: 'id' });
     database.createObjectStore('outbox', { keyPath: 'key' });
-    database.createObjectStore('meta', { keyPath: 'k' });
+    database.createObjectStore('meta', { keyPath: 'key' });
   },
 ];
 
@@ -76,8 +76,8 @@ export const db = {
   clear: (storeName: StoreName) => inTransaction(storeName, 'readwrite', store => { store.clear(); }),
 
   async getMeta<T>(key: string): Promise<T | null> {
-    const record = await inTransaction('meta', 'readonly', store => settled(store.get(key) as IDBRequest<{ k: string; v: T } | undefined>));
-    return record ? record.v : null;
+    const record = await inTransaction('meta', 'readonly', store => settled(store.get(key) as IDBRequest<{ key: string; value: T } | undefined>));
+    return record ? record.value : null;
   },
-  setMeta: (key: string, value: unknown) => inTransaction('meta', 'readwrite', store => { store.put({ k: key, v: value }); }),
+  setMeta: (key: string, value: unknown) => inTransaction('meta', 'readwrite', store => { store.put({ key, value }); }),
 };

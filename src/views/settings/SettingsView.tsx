@@ -10,7 +10,7 @@ import { ArchivedTrackers, TrackerList } from './TrackerList';
 import { SyncPanel } from './SyncPanel';
 
 const newTracker = (): Tracker => ({
-  id: uuid(), name: '', type: 'episode', grp: '', color: 'indigo', config: defaultConfig('episode'), sort: 0, archived: false,
+  id: uuid(), name: '', type: 'episode', group_name: '', color: 'indigo', config: defaultConfig('episode'), sort_order: 0, archived: false,
 });
 
 export function SettingsView() {
@@ -27,7 +27,7 @@ export function SettingsView() {
       <section>
         <div className="row-between section-header">
           <h2>Trackers</h2>
-          <button className="button" id="addTracker" type="button" onClick={() => setEditing({ tracker: newTracker(), isNew: true })}>
+          <button className="button" id="add-tracker" type="button" onClick={() => setEditing({ tracker: newTracker(), isNew: true })}>
             Add tracker
           </button>
         </div>
@@ -47,7 +47,7 @@ export function SettingsView() {
 
       <section>
         <h2>Sync</h2>
-        <div className="panel stack" id="syncPanel">
+        <div className="panel stack" id="sync-panel">
           <SyncPanel />
         </div>
       </section>
@@ -61,12 +61,12 @@ export function SettingsView() {
             one file with everything.
           </p>
           <div className="button-row">
-            <button className="button primary" id="exportAnalysis" type="button" onClick={safely(exportForAnalysis)}>
+            <button className="button primary" id="export-analysis" type="button" onClick={safely(exportForAnalysis)}>
               Export for analysis
             </button>
-            <button className="button" id="exportJson" type="button" onClick={safely(exportBackup)}>Export backup</button>
+            <button className="button" id="export-backup" type="button" onClick={safely(exportBackup)}>Export backup</button>
           </div>
-          <p className="small muted" id="dataStats">{dataStats(liveEntries(data).map(entryTime))}</p>
+          <p className="small muted">{dataStats(liveEntries(data).map(entryTime))}</p>
         </div>
       </section>
     </section>

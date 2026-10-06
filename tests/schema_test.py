@@ -108,13 +108,13 @@ def cur():
 
 def add_fixture_data(cur):
     for t in FIXTURE['trackers']:
-        cur.execute('insert into public.trackers (id, name, type, grp, color, config, sort, archived) '
+        cur.execute('insert into public.trackers (id, name, type, group_name, color, config, sort_order, archived) '
                     'values (%s, %s, %s, %s, %s, %s, %s, %s)',
-                    (t['id'], t['name'], t['type'], t['grp'], t['color'], Jsonb(t['config']), t['sort'], t['archived']))
+                    (t['id'], t['name'], t['type'], t['group_name'], t['color'], Jsonb(t['config']), t['sort_order'], t['archived']))
     for e in FIXTURE['entries']:
-        cur.execute('insert into public.entries (id, tracker_id, ts, kind, num, txt, note, checkin_id, deleted) '
+        cur.execute('insert into public.entries (id, tracker_id, occurred_at, kind, value, text, note, checkin_id, deleted) '
                     'values (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
-                    (e['id'], e['tracker_id'], e['ts'], e['kind'], e['num'], e['txt'], e['note'], e['checkin_id'], e['deleted']))
+                    (e['id'], e['tracker_id'], e['occurred_at'], e['kind'], e['value'], e['text'], e['note'], e['checkin_id'], e['deleted']))
 
 
 # ---------- schema.sql itself ----------

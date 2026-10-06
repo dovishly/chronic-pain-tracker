@@ -40,11 +40,11 @@ export function CheckinView({ draft, onChange, onSaved }: Props) {
   return (
     <section id="view-checkin" className="stack">
       <div className="panel">
-        <label className="field" htmlFor="ciTime">
+        <label className="field">
           When
           <input
             type="datetime-local"
-            id="ciTime"
+            id="checkin-time"
             value={draft.time}
             onChange={e => {
               const time = e.target.value;
@@ -53,7 +53,7 @@ export function CheckinView({ draft, onChange, onSaved }: Props) {
           />
         </label>
       </div>
-      <div id="ciGroups" className="stack">
+      <div className="stack">
         {groups.length ? (
           groups.map(([group, trackers]) => (
             <section key={group}>
@@ -74,7 +74,7 @@ export function CheckinView({ draft, onChange, onSaved }: Props) {
           <p className="empty-note">No check-in questions yet. Add a Rating, Number, Choices or Note tracker in Settings.</p>
         )}
       </div>
-      <button className="button primary full-width" id="ciSave" type="button" onClick={save}>Save check-in</button>
+      <button className="button primary full-width" id="save-checkin" type="button" onClick={save}>Save check-in</button>
       <p className="muted small">Every question is optional. Only what you answer is saved.</p>
     </section>
   );
@@ -135,7 +135,6 @@ function AnswerInput({ tracker, answer, onAnswer, levels }: QuestionProps & { le
           <input
             type="number"
             inputMode="decimal"
-            id={`checkin-number-${tracker.id}`}
             value={answer == null ? '' : String(answer)}
             min={min ?? undefined}
             max={max ?? undefined}
@@ -176,7 +175,6 @@ function AnswerInput({ tracker, answer, onAnswer, levels }: QuestionProps & { le
     case 'text':
       return (
         <textarea
-          id={`checkin-text-${tracker.id}`}
           aria-label={tracker.name}
           placeholder="Optional"
           value={typeof answer === 'string' ? answer : ''}

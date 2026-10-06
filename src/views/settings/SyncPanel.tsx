@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useSyncState } from '../../hooks';
 import { dayKey, dayLabel, formatTime, prefs } from '../../lib/util';
-import { sync, RequestError, type SyncState } from '../../lib/sync';
+import { sync, type SyncState } from '../../lib/sync';
 import { safely, toast } from '../../lib/toast';
 
 export function SyncPanel() {
@@ -31,19 +31,19 @@ function ConnectForm() {
       <p className="small">
         Logbook works on this device without an account. To back up and sync, connect your own Supabase project (see the setup guide).
       </p>
-      <label className="field" htmlFor="cfgUrl">
+      <label className="field">
         Project URL
-        <input id="cfgUrl" placeholder="https://xxxx.supabase.co" autoComplete="off" autoCapitalize="off" spellCheck={false}
+        <input id="project-url" placeholder="https://xxxx.supabase.co" autoComplete="off" autoCapitalize="off" spellCheck={false}
           value={url} onChange={e => setUrl(e.target.value)} />
       </label>
-      <label className="field" htmlFor="cfgKey">
+      <label className="field">
         Anon / publishable key
-        <input id="cfgKey" autoComplete="off" autoCapitalize="off" spellCheck={false}
+        <input id="project-key" autoComplete="off" autoCapitalize="off" spellCheck={false}
           value={key} onChange={e => setKey(e.target.value)} />
       </label>
-      <p className="small error-text" id="cfgErr">{error}</p>
+      <p className="small error-text" id="project-error">{error}</p>
       <div className="button-row">
-        <button type="button" className="button primary" id="cfgSave" onClick={connect}>Connect</button>
+        <button type="button" className="button primary" id="project-connect" onClick={connect}>Connect</button>
       </div>
     </>
   );
@@ -58,10 +58,10 @@ function LinkChoice() {
         Replace this device's data with your account's data? The entries only on this device will be removed. Export a backup first if you want to keep them.
       </p>
       <div className="button-row">
-        <button type="button" className="button primary" id="useAccount" onClick={safely(() => sync.chooseReplace(true))}>
+        <button type="button" className="button primary" id="use-account-data" onClick={safely(() => sync.chooseReplace(true))}>
           Use account data
         </button>
-        <button type="button" className="button" id="cancelLink" onClick={safely(() => sync.chooseReplace(false))}>
+        <button type="button" className="button" id="cancel-sign-in" onClick={safely(() => sync.chooseReplace(false))}>
           Cancel and sign out
         </button>
       </div>
@@ -95,13 +95,7 @@ function SignInForm({ state, projectUrl }: { state: SyncState; projectUrl: strin
       setError('');
       toast('Code sent. Check your email.');
     } catch (e) {
-      const message = (e as Error).message;
-      // Supabase refuses a code for an unknown email because sign-ups are off. Other refusals keep their own message.
-      const notAUser = (e instanceof RequestError && ['otp_disabled', 'signup_disabled', 'user_not_found'].includes(e.code ?? ''))
-        || /signups? not allowed|user not found/i.test(message);
-      setError(notAUser
-        ? "That email isn't a user in this project. Add yourself in Supabase → Authentication → Users first."
-        : message);
+      setError((e as Error).message);
     } finally {
       setBusy(null);
     }
@@ -119,8 +113,7 @@ function SignInForm({ state, projectUrl }: { state: SyncState; projectUrl: strin
       toast('Signed in');
       // Signed in now, so this form is replaced; no state to reset.
     } catch (e) {
-      const message = (e as Error).message;
-      setError(/expired|invalid/i.test(message) ? "That code didn't work or has expired. Send a new one." : message);
+      setError((e as Error).message);
       setBusy(null);
     }
   };
@@ -136,45 +129,49 @@ function SignInForm({ state, projectUrl }: { state: SyncState; projectUrl: strin
         Connected to <span className="mono">{projectUrl.replace(/^https:\/\//, '')}</span>. Sign in with the email on your Supabase account. You'll get a code by email.
       </p>
       {state.detail && <p className="small error-text">{state.detail}</p>}
-      <label className="field" htmlFor="authEmail">
+      <label className="field">
         Email
-        <input id="authEmail" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
+        <input id="sign-in-email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
       </label>
       {codeSentTo && (
-        <label className="field" htmlFor="authCode">
+        <label className="field">
           Code from the email
-          <input id="authCode" inputMode="numeric" autoComplete="one-time-code" maxLength={10}
+          <input id="sign-in-code" inputMode="numeric" autoComplete="one-time-code" maxLength={10}
             value={code} onChange={e => setCode(e.target.value)} />
         </label>
       )}
-      <p className="small error-text" id="authErr">{error}</p>
+      <p className="small error-text" id="sign-in-error">{error}</p>
       <div className="button-row">
         {codeSentTo ? (
           <>
-            <button type="button" className="button primary" id="authVerify" disabled={busy === 'verify'} onClick={verify}>Sign in</button>
-            <button type="button" className="button" id="authSend" disabled={busy === 'send'} onClick={sendCode}>Send a new code</button>
+            <button type="button" className="button primary" id="sign-in" disabled={busy === 'verify'} onClick={verify}>Sign in</button>
+            <button type="button" className="button" id="send-code" disabled={busy === 'send'} onClick={sendCode}>Send a new code</button>
           </>
         ) : (
-          <button type="button" className="button primary" id="authSend" disabled={busy === 'send'} onClick={sendCode}>Email me a code</button>
+          <button type="button" className="button primary" id="send-code" disabled={busy === 'send'} onClick={sendCode}>Email me a code</button>
         )}
-        <button type="button" className="button danger" id="cfgDisconnect" onClick={disconnect}>Disconnect project</button>
+        <button type="button" className="button danger" id="project-disconnect" onClick={disconnect}>Disconnect project</button>
       </div>
     </>
   );
 }
 
+/** "Last synced today at 9:05 AM.", or "… on Mon, Sep 29 at …" for an older sync. */
+function lastSyncText(lastSync: number | null): string {
+  if (!lastSync) return 'Not synced yet.';
+  const day = dayLabel(dayKey(lastSync));
+  const when = day === 'Today' || day === 'Yesterday' ? day.toLowerCase() : 'on ' + day;
+  return `Last synced ${when} at ${formatTime(lastSync)}.`;
+}
+
 function SignedIn({ state }: { state: SyncState }) {
-  const { lastSync } = state;
-  const lastSyncText = lastSync
-    ? `Last synced ${dayLabel(dayKey(lastSync)).toLowerCase()} at ${formatTime(lastSync)}.`
-    : 'Not synced yet.';
   return (
     <>
-      <p className="small">Signed in as <b>{state.email || 'you'}</b>. {lastSyncText}</p>
+      <p className="small">Signed in as <b>{state.email || 'you'}</b>. {lastSyncText(state.lastSync)}</p>
       {state.status === 'error' && <p className="small error-text">{state.detail}</p>}
       <div className="button-row">
-        <button type="button" className="button primary" id="syncNow" onClick={() => sync.run()}>Sync now</button>
-        <button type="button" className="button" id="signOut" onClick={safely(sync.signOut)}>Sign out</button>
+        <button type="button" className="button primary" id="sync-now" onClick={() => sync.run()}>Sync now</button>
+        <button type="button" className="button" id="sign-out" onClick={safely(sync.signOut)}>Sign out</button>
       </div>
     </>
   );

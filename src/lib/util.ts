@@ -20,6 +20,9 @@ export function dayStart(key: string): number {
   return new Date(year, month - 1, day).getTime();
 }
 
+/** The day after a "YYYY-MM-DD" day. (30 h past midnight is always the next day, even across DST changes.) */
+export const nextDay = (key: string) => dayKey(dayStart(key) + 30 * 60 * MINUTE_MS);
+
 /** "Today", "Yesterday", or a short date like "Mon, Sep 29". */
 export function dayLabel(key: string): string {
   if (key === dayKey(Date.now())) return 'Today';
@@ -81,9 +84,11 @@ export function uuid(): string {
 
 /** Small settings kept as JSON in localStorage under "logbook.<name>". */
 export const prefs = {
+  /** The localStorage key for a setting. */
+  key: (name: string) => 'logbook.' + name,
   get<T>(name: string, fallback: T | null = null): T | null {
     try {
-      const stored = localStorage.getItem('logbook.' + name);
+      const stored = localStorage.getItem(prefs.key(name));
       return stored == null ? fallback : (JSON.parse(stored) as T);
     } catch {
       return fallback;
@@ -91,8 +96,8 @@ export const prefs = {
   },
   set(name: string, value: unknown): void {
     try {
-      if (value == null) localStorage.removeItem('logbook.' + name);
-      else localStorage.setItem('logbook.' + name, JSON.stringify(value));
+      if (value == null) localStorage.removeItem(prefs.key(name));
+      else localStorage.setItem(prefs.key(name), JSON.stringify(value));
     } catch {
       // Storage unavailable (e.g. private browsing); the app keeps working without it.
     }

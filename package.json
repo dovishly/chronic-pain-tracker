@@ -18,6 +18,7 @@
     "db:apply": "docker exec -i -e PGOPTIONS='-c client_min_messages=warning' supabase_db_tracker psql -U postgres -v ON_ERROR_STOP=1 -q < schema.sql"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.117.2",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

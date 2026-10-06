@@ -21,7 +21,7 @@ function TrackerRow({ tracker, children }: { tracker: Tracker; children: ReactNo
 export function TrackerList({ onEdit }: { onEdit: (trackerId: string) => void }) {
   const groups = groupTrackers(sortedTrackers(useData()));
   return (
-    <div id="trackerList">
+    <div id="trackers">
       {groups.length ? (
         groups.map(([group, trackers]) => (
           <Fragment key={group}>
@@ -50,10 +50,10 @@ export function ArchivedTrackers() {
   const archived = sortedTrackers(useData(), null, { includeArchived: true }).filter(t => t.archived);
   if (!archived.length) return null;
   return (
-    <details className="archived-trackers" id="archWrap">
+    <details className="archived-trackers" id="archived-trackers">
       <summary>Archived trackers</summary>
       <div className="panel">
-        <ul className="tracker-list" id="archList">
+        <ul className="tracker-list">
           {archived.map(tracker => (
             <TrackerRow key={tracker.id} tracker={tracker}>
               <button type="button" data-restore-tracker={tracker.id} onClick={() => restoreTracker(tracker.id)}>

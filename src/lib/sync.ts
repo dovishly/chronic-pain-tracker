@@ -1,5 +1,7 @@
-// Sync with the owner's own Supabase project over plain HTTPS: the REST (/rest/v1) and
-// Auth (/auth/v1) endpoints, no SDK. The protocol is described in CLAUDE.md.
+// Sync with the owner's own Supabase project, through supabase-js. Every write is saved on the device
+// and queued in the outbox first (store.ts), so the app works the same offline. The protocol is
+// described in CLAUDE.md.
+import { createClient, type Session, type Subscription, type SupabaseClient } from '@supabase/supabase-js';
 import { prefs } from './util';
 import { db } from './db';
 import { trackers, entries, pendingKeys, dataChanged } from './data';
@@ -18,24 +20,17 @@ export interface SyncState {
   lastSync: number | null;
 }
 
-interface Config { url: string; key: string } // project URL and anon/publishable key
-interface Session { access_token: string; refresh_token: string; expires_at: number; email: string | null }
-interface AuthResponse {
-  access_token: string;
-  refresh_token: string;
-  expires_at?: number;
-  expires_in?: number;
-  user?: { email?: string };
-}
-/** A queued write. v is the item's updated_at when queued, so an upload can tell if it changed since. */
-export interface OutboxItem { key: string; table: Table; v: string | undefined; row: Record<string, unknown> }
+interface Project { url: string; key: string } // project URL and anon/publishable key
+
+/** A queued write. updatedAt is the row's updated_at when queued, so an upload can tell if it changed since. */
+export interface OutboxItem { key: string; table: Table; updatedAt: string | undefined; row: Record<string, unknown> }
 
 type Table = 'trackers' | 'entries';
 const TABLES: Table[] = ['trackers', 'entries']; // trackers first, so entries never point at a missing tracker
 const UPLOAD_BATCH = 200;
 const PULL_PAGE = 1000;
-const REFRESH_MARGIN_MS = 90_000;      // refresh the access token once it has less than this left
 const SYNC_DELAY_AFTER_WRITE_MS = 700; // lets a burst of taps go up in one request
+const AUTH_PREF = 'auth'; // the pref supabase-js keeps the session in
 
 /**
  * The schema.sql version this app needs: public.logbook_schema_version() in the database must be at
@@ -46,16 +41,18 @@ const SCHEMA_VERSION = 1;
 const OUTDATED_SCHEMA_MESSAGE =
   'Your Supabase database needs an update. Run the latest schema.sql in the Supabase SQL Editor (see the setup guide), then tap Sync now.';
 
-let config = prefs.get<Config>('cfg');
-let session = prefs.get<Session>('session');
+let project = prefs.get<Project>('project');
+let client: SupabaseClient | null = null;
+let authSubscription: Subscription | null = null;
+let session: Session | null = null;
+let leaving = false; // signing out or disconnecting on purpose, so the sign-out isn't reported as an expired sign-in
+
 let status: SyncStatus = 'local';
 let statusDetail = '';
-
 let running = false;
 let runAgain = false;
 let writeTimer: ReturnType<typeof setTimeout> | undefined;
-let refreshing: Promise<void> | null = null; // the in-flight token refresh, shared by everyone who needs it
-let schemaChecked = false;                    // once per app session; "Sync now" after an error checks again
+let schemaChecked = false; // once per app session; "Sync now" after an error checks again
 
 const listeners = new Set<() => void>();
 let snapshot = buildSnapshot();
@@ -64,9 +61,9 @@ function buildSnapshot(): SyncState {
   return {
     status,
     detail: statusDetail,
-    projectUrl: config?.url ?? null,
+    projectUrl: project?.url ?? null,
     signedIn: !!session,
-    email: session?.email ?? null,
+    email: session?.user.email ?? null,
     waiting: pendingKeys.size,
     lastSync: prefs.get<number>('lastSync'),
   };
@@ -83,9 +80,9 @@ function setStatus(next: SyncStatus, detail = statusDetail): void {
   notify();
 }
 
-/** An Error from a Supabase call, with the HTTP status and the server's error code if it sent one. */
-export class RequestError extends Error {
-  constructor(message: string, readonly status?: number, readonly code?: string) {
+/** A failed Supabase call. status is the HTTP status, or 0 when the request never reached the server. */
+class SyncError extends Error {
+  constructor(message: string, readonly status: number) {
     super(message);
   }
 }
@@ -96,102 +93,35 @@ class WaitingForChoice extends Error {}
 /** Thrown when the database's schema is older than this app needs. */
 class OutdatedSchema extends Error {}
 
-/* ---------- HTTP and auth ---------- */
+/** True for an error from a request that never reached the server (offline, DNS, refused). */
+const isNetworkFailure = (error: unknown) => error instanceof TypeError || (error as { status?: unknown })?.status === 0;
 
-function setSession(auth: AuthResponse | null): void {
-  session = auth ? {
-    access_token: auth.access_token,
-    refresh_token: auth.refresh_token,
-    expires_at: auth.expires_at || Math.floor(Date.now() / 1000) + (auth.expires_in || 3600),
-    email: auth.user?.email || session?.email || null,
-  } : null;
-  prefs.set('session', session);
-}
+/* ---------- the Supabase client ---------- */
 
-const tokenExpiresSoon = (s: Session) => s.expires_at * 1000 - Date.now() <= REFRESH_MARGIN_MS;
-
-interface RequestOptions {
-  method?: string;
-  body?: unknown;
-  headers?: Record<string, string>;
-  auth?: boolean;
-}
-
-/**
- * Calls a Supabase endpoint and returns the parsed JSON (or null for an empty body).
- * Throws a RequestError on failure. With auth, sends the access token, and retries once
- * after a refresh if the server rejects it.
- */
-async function request<T = unknown>(path: string, options: RequestOptions = {}, isRetry = false): Promise<T> {
-  const { method = 'GET', body, headers = {}, auth = true } = options;
-  if (!config) throw new Error('Not connected');
-  // Signed-out calls (send code, verify, refresh) need only the apikey header.
-  const allHeaders: Record<string, string> = { apikey: config.key, 'Content-Type': 'application/json', ...headers };
-  if (auth) {
-    if (session && tokenExpiresSoon(session)) await refresh();
-    if (!session) throw new RequestError('Signed out', 401);
-    allHeaders.Authorization = 'Bearer ' + session.access_token;
-  }
-
-  const response = await fetch(config.url.replace(/\/+$/, '') + path, {
-    method,
-    headers: allHeaders,
-    body: body === undefined ? undefined : JSON.stringify(body),
+/** Opens the client for the connected project. Its session is restored from storage and refreshed as needed. */
+function openClient(): void {
+  if (!project) return;
+  client = createClient(project.url, project.key, {
+    auth: { storageKey: prefs.key(AUTH_PREF), detectSessionInUrl: false },
+    db: { retry: false }, // the outbox retries: every minute, on focus and when back online
   });
-  if (response.status === 401 && auth && !isRetry) {
-    await refresh(true);
-    return request<T>(path, options, true);
-  }
-
-  const text = await response.text();
-  let json: Record<string, unknown> | null = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    // Not JSON; the status code alone says what happened.
-  }
-  if (!response.ok) {
-    const message = json && (json.msg || json.message || json.error_description || json.error);
-    const code = json && (json.error_code || json.code); // Auth sends error_code (text) and code (the status)
-    throw new RequestError(
-      typeof message === 'string' ? message : `Request failed (${response.status})`,
-      response.status,
-      code == null ? undefined : String(code),
-    );
-  }
-  return json as T;
+  authSubscription = client.auth.onAuthStateChange((event, next) => {
+    session = next;
+    if (event === 'SIGNED_OUT' && !leaving) setStatus('signedout', 'Your sign-in expired. Sign in again in Settings.');
+    else notify();
+  }).data.subscription;
 }
 
-/**
- * Swaps the refresh token for a new session (only when the token is about to expire,
- * unless forced). If the server rejects the refresh token, signs out.
- */
-function refresh(force = false): Promise<void> {
-  // Decide before starting, so a refresh that has nothing to do never leaves `refreshing` set.
-  if (refreshing) return refreshing;
-  const current = session;
-  if (!current?.refresh_token) return Promise.resolve();
-  if (!force && !tokenExpiresSoon(current)) return Promise.resolve();
+function supabase(): SupabaseClient {
+  if (!client) throw new Error('Not connected');
+  return client;
+}
 
-  refreshing = (async () => {
-    try {
-      const auth = await request<AuthResponse>('/auth/v1/token?grant_type=refresh_token', {
-        method: 'POST',
-        body: { refresh_token: current.refresh_token },
-        auth: false,
-      });
-      setSession(auth);
-    } catch (error) {
-      const status = error instanceof RequestError ? error.status : undefined;
-      const rejected = status !== undefined && status >= 400 && status < 500;
-      if (!rejected) throw error;
-      setSession(null);
-      setStatus('signedout', 'Your sign-in expired. Sign in again in Settings.');
-    } finally {
-      refreshing = null;
-    }
-  })();
-  return refreshing;
+/** The data from a Supabase call, or a SyncError if it failed. */
+async function check<T>(call: PromiseLike<{ data: T; error: { message: string } | null; status: number }>): Promise<T> {
+  const { data, error, status } = await call;
+  if (error) throw new SyncError(error.message, status);
+  return data;
 }
 
 /* ---------- upload and download ---------- */
@@ -203,14 +133,10 @@ async function flushOutbox(): Promise<void> {
     const tableItems = items.filter(item => item.table === table);
     for (let i = 0; i < tableItems.length; i += UPLOAD_BATCH) {
       const batch = tableItems.slice(i, i + UPLOAD_BATCH);
-      await request('/rest/v1/' + table, {
-        method: 'POST',
-        body: batch.map(item => item.row),
-        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      });
+      await check(supabase().from(table).upsert(batch.map(item => item.row)));
       for (const item of batch) {
         const current = await db.get<OutboxItem>('outbox', item.key);
-        if (current && current.v === item.v) {
+        if (current && current.updatedAt === item.updatedAt) {
           await db.remove('outbox', item.key);
           pendingKeys.delete(item.key);
         }
@@ -219,14 +145,19 @@ async function flushOutbox(): Promise<void> {
   }
 }
 
+const cursorKey = (table: Table) => 'cursor:' + table;
+
 /** Downloads rows changed since the last pull. Returns true if anything on this device changed. */
 async function pullChanges(): Promise<boolean> {
   let changed = false;
   for (const table of TABLES) {
-    let cursor = (await db.getMeta<string>('cursor:' + table)) || '1970-01-01T00:00:00Z';
+    let cursor = (await db.getMeta<string>(cursorKey(table))) || '1970-01-01T00:00:00Z';
     while (true) {
-      const query = `select=*&updated_at=gte.${encodeURIComponent(cursor)}&order=updated_at.asc&limit=${PULL_PAGE}`;
-      const rows = (await request<Record<string, unknown>[] | null>(`/rest/v1/${table}?${query}`)) || [];
+      const rows: Record<string, unknown>[] = (await check(supabase().from(table)
+        .select('*')
+        .gte('updated_at', cursor)
+        .order('updated_at', { ascending: true })
+        .limit(PULL_PAGE))) ?? [];
 
       const updated: (Tracker | Entry)[] = [];
       for (const row of rows) {
@@ -251,7 +182,7 @@ async function pullChanges(): Promise<boolean> {
 
       if (rows.length) {
         cursor = String(rows[rows.length - 1].updated_at);
-        await db.setMeta('cursor:' + table, cursor);
+        await db.setMeta(cursorKey(table), cursor);
       }
       if (rows.length < PULL_PAGE) break;
     }
@@ -259,23 +190,18 @@ async function pullChanges(): Promise<boolean> {
   return changed;
 }
 
+async function resetCursors(): Promise<void> {
+  for (const table of TABLES) await db.setMeta(cursorKey(table), null);
+}
+
 /** Makes sure the database has the tables and columns this app sends; see SCHEMA_VERSION. */
 async function checkSchema(): Promise<void> {
   if (schemaChecked) return;
-  let version = 0;
-  try {
-    version = await request<number>('/rest/v1/rpc/logbook_schema_version', { method: 'POST', body: {} });
-  } catch (error) {
-    // 404: the function doesn't exist yet, so schema.sql is from before versions were tracked.
-    if (!(error instanceof RequestError && error.status === 404)) throw error;
-  }
-  if (version < SCHEMA_VERSION) throw new OutdatedSchema();
+  const { data, error, status: httpStatus } = await supabase().rpc('logbook_schema_version');
+  // 404: the function doesn't exist yet, so schema.sql is from before versions were tracked.
+  if (error && httpStatus !== 404) throw new SyncError(error.message, httpStatus);
+  if ((error ? 0 : Number(data)) < SCHEMA_VERSION) throw new OutdatedSchema();
   schemaChecked = true;
-}
-
-async function resetCursors(): Promise<void> {
-  await db.setMeta('cursor:trackers', null);
-  await db.setMeta('cursor:entries', null);
 }
 
 /**
@@ -284,7 +210,7 @@ async function resetCursors(): Promise<void> {
  * has entries of its own, the owner is asked first (status needsChoice).
  */
 async function linkAccount(): Promise<void> {
-  const accountTrackers = await request<unknown[] | null>('/rest/v1/trackers?select=id&limit=1');
+  const accountTrackers = await check(supabase().from('trackers').select('id').limit(1));
   if (accountTrackers?.length) {
     const localEntryCount = [...entries.values()].filter(e => !e.deleted).length;
     if (localEntryCount > 0 && !(await db.getMeta<boolean>('replaceConfirmed'))) {
@@ -311,13 +237,16 @@ async function run(): Promise<void> {
     runAgain = true;
     return;
   }
-  if (!config) return setStatus('local', '');
-  if (!session) return setStatus('signedout');
-  if (!navigator.onLine) return setStatus('offline');
+  if (!project) return setStatus('local', '');
 
   running = true;
-  setStatus('syncing');
   try {
+    const { data, error } = await supabase().auth.getSession(); // refreshes the access token if it's about to expire
+    if (error) throw error;
+    if (!data.session) return setStatus('signedout');
+    if (!navigator.onLine) return setStatus('offline');
+
+    setStatus('syncing');
     await checkSchema();
     if (await db.getMeta<boolean>('needsLink')) await linkAccount();
     await flushOutbox();
@@ -332,7 +261,7 @@ async function run(): Promise<void> {
     } else if (error instanceof OutdatedSchema) {
       status = 'error';
       statusDetail = OUTDATED_SCHEMA_MESSAGE;
-    } else if (!navigator.onLine || error instanceof TypeError) { // fetch throws TypeError when the network fails
+    } else if (!navigator.onLine || isNetworkFailure(error)) {
       status = 'offline';
       statusDetail = '';
     } else if (status !== 'signedout') {
@@ -349,14 +278,16 @@ async function run(): Promise<void> {
   }
 }
 
+/** Signs out on the server too. Throws if that fails (say, offline), leaving the person signed in. */
 async function signOut(): Promise<void> {
+  leaving = true;
   try {
-    await request('/auth/v1/logout', { method: 'POST' });
-  } catch {
-    // Forgetting the session locally is enough.
+    const { error } = await supabase().auth.signOut();
+    if (error) throw error;
+  } finally {
+    leaving = false;
   }
-  setSession(null);
-  setStatus('signedout');
+  setStatus('signedout', '');
 }
 
 /**
@@ -382,6 +313,11 @@ function checkProjectUrl(url: string): void {
   }
 }
 
+/** Error codes Supabase Auth sends when asked for a code for an email that isn't a user (sign-ups are off). */
+const NOT_A_USER = ['otp_disabled', 'signup_disabled', 'user_not_found'];
+
+openClient();
+
 export const sync = {
   /** For useSyncExternalStore: the current SyncState, and change notifications. */
   get: (): SyncState => snapshot,
@@ -401,43 +337,50 @@ export const sync = {
   },
 
   configure(url: string, key: string): void {
-    url = url.trim();
+    url = url.trim().replace(/\/+$/, '');
     key = key.trim();
     checkProjectUrl(url);
     if (key.length < 20) throw new Error('That key looks too short. Copy the full anon or publishable key.');
-    config = { url: url.replace(/\/+$/, ''), key };
-    prefs.set('cfg', config);
+    project = { url, key };
+    prefs.set('project', project);
+    openClient();
     setStatus('signedout');
   },
 
+  /** Forgets the project. Signs out on the server if it can; offline, the session is forgotten here anyway. */
   async disconnect(): Promise<void> {
+    leaving = true;
     try {
-      if (session) await request('/auth/v1/logout', { method: 'POST' });
-    } catch {
-      // Forgetting the session locally is enough.
+      await client?.auth.signOut();
+    } finally {
+      leaving = false;
     }
-    setSession(null);
-    config = null;
-    prefs.set('cfg', null);
-    setStatus('local');
+    client?.auth.stopAutoRefresh();
+    authSubscription?.unsubscribe();
+    prefs.set(AUTH_PREF, null);
+    client = null;
+    authSubscription = null;
+    session = null;
+    project = null;
+    prefs.set('project', null);
+    setStatus('local', '');
     await resetCursors();
   },
 
   async sendCode(email: string): Promise<void> {
-    await request('/auth/v1/otp', {
-      method: 'POST',
-      auth: false,
-      body: { email: email.trim(), create_user: false },
-    });
+    const { error } = await supabase().auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false } });
+    if (!error) return;
+    const notAUser = NOT_A_USER.includes(error.code ?? '') || /signups? not allowed|user not found/i.test(error.message);
+    throw new Error(notAUser
+      ? "That email isn't a user in this project. Add yourself in Supabase → Authentication → Users first."
+      : error.message);
   },
 
   async verify(email: string, code: string): Promise<void> {
-    const auth = await request<AuthResponse>('/auth/v1/verify', {
-      method: 'POST',
-      auth: false,
-      body: { type: 'email', email: email.trim(), token: code.trim() },
-    });
-    setSession(auth);
+    const { error } = await supabase().auth.verifyOtp({ type: 'email', email: email.trim(), token: code.trim() });
+    if (error) {
+      throw new Error(/expired|invalid/i.test(error.message) ? "That code didn't work or has expired. Send a new one." : error.message);
+    }
     await db.setMeta('needsLink', true);
     setStatus('syncing');
     run();

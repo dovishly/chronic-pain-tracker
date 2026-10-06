@@ -17,16 +17,17 @@ export function TodayView({ shownDay, onShowDay }: Props) {
   const data = useData();
   const now = useNow(CLOCK_REFRESH_MS);
   const active = activeEpisodes(data);
+  const running = Object.entries(active);
   const episodeGroups = groupTrackers(sortedTrackers(data, 'episode'));
   const moments = sortedTrackers(data, 'moment');
 
   return (
     <section id="view-today" className="stack spacious">
-      <section aria-labelledby="now-h">
-        <h2 id="now-h">On now</h2>
-        <div className="running-list" id="now">
-          {Object.keys(active).length ? (
-            Object.entries(active).map(([trackerId, episode]) => (
+      <section aria-labelledby="running-heading">
+        <h2 id="running-heading">On now</h2>
+        <div className="running-list" id="running">
+          {running.length ? (
+            running.map(([trackerId, episode]) => (
               <RunningPill key={trackerId} tracker={data.trackers.get(trackerId)!} episode={episode} now={now} />
             ))
           ) : (
@@ -35,7 +36,7 @@ export function TodayView({ shownDay, onShowDay }: Props) {
         </div>
       </section>
 
-      <div id="episodes" className="stack spacious">
+      <div className="stack spacious">
         {episodeGroups.length ? (
           episodeGroups.map(([group, trackers]) => (
             <section key={group}>
@@ -53,9 +54,9 @@ export function TodayView({ shownDay, onShowDay }: Props) {
       </div>
 
       {moments.length > 0 && (
-        <section aria-labelledby="marks-h" id="marksWrap">
-          <h2 id="marks-h">Moments</h2>
-          <div className="moment-buttons" id="marks">
+        <section aria-labelledby="moments-heading">
+          <h2 id="moments-heading">Moments</h2>
+          <div className="moment-buttons" id="moments">
             {moments.map(tracker => (
               <button
                 key={tracker.id}

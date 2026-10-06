@@ -20,6 +20,8 @@ interface ConfigFields {
   max: string;
 }
 
+type SetField = <K extends keyof ConfigFields>(key: K, value: ConfigFields[K]) => void;
+
 function configFields(config: TrackerConfig): ConfigFields {
   return {
     levels: (config.levels || []).join('\n'),
@@ -68,7 +70,7 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
   const data = useData();
   const [name, setName] = useState(tracker.name);
   const [type, setType] = useState(tracker.type);
-  const [group, setGroup] = useState(tracker.grp || '');
+  const [group, setGroup] = useState(tracker.group_name || '');
   const [color, setColor] = useState(tracker.color);
   // Switching type starts that type's settings from its defaults.
   const [baseConfig, setBaseConfig] = useState(tracker.config);
@@ -82,13 +84,15 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
 
   // A tracker's type is fixed once it has entries, since they were recorded in that type's shape.
   const typeLocked = !isNew && liveEntries(data).some(e => e.tracker_id === tracker.id);
-  const existingGroups = [...new Set(sortedTrackers(data, null, { includeArchived: true }).map(t => t.grp).filter(Boolean))];
-  const setField = <K extends keyof ConfigFields>(key: K, value: ConfigFields[K]) => setFields(f => ({ ...f, [key]: value }));
+  const existingGroups = [...new Set(sortedTrackers(data, null, { includeArchived: true })
+    .map(t => t.group_name).filter((g): g is string => !!g))];
+  const setField: SetField = (key, value) => setFields(f => ({ ...f, [key]: value }));
 
   const changeType = (next: TrackerType) => {
+    const config = defaultConfig(next);
     setType(next);
-    setBaseConfig(defaultConfig(next));
-    setFields(configFields(defaultConfig(next)));
+    setBaseConfig(config);
+    setFields(configFields(config));
   };
 
   const save = async () => {
@@ -96,7 +100,7 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
       ...tracker,
       name: name.trim(),
       type,
-      grp: group.trim(),
+      group_name: group.trim(),
       color,
       config: configFromFields(type, fields, baseConfig),
     };
@@ -113,62 +117,60 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
   };
 
   return (
-    <div id="editor">
-      <div className="panel stack tracker-editor">
-        <h3>{isNew ? 'New tracker' : 'Edit tracker'}</h3>
+    <div className="panel stack tracker-editor">
+      <h3>{isNew ? 'New tracker' : 'Edit tracker'}</h3>
 
-        <label className="field" htmlFor="edName">
-          Name
-          <input id="edName" ref={nameInput} value={name} autoComplete="off" onChange={e => setName(e.target.value)} />
-        </label>
+      <label className="field">
+        Name
+        <input id="editor-name" ref={nameInput} value={name} autoComplete="off" onChange={e => setName(e.target.value)} />
+      </label>
 
-        <label className="field" htmlFor="edType">
-          Type
-          <select id="edType" value={type} disabled={typeLocked} onChange={e => changeType(e.target.value as TrackerType)}>
-            {(Object.keys(TYPE_LABELS) as TrackerType[]).map(t => (
-              <option key={t} value={t}>{TYPE_LABELS[t]}</option>
-            ))}
-          </select>
-        </label>
-        <p className="small muted">
-          {typeLocked
-            ? "The type can't change once a tracker has entries. Archive it and make a new one instead."
-            : TYPE_HELP[type]}
-        </p>
+      <label className="field">
+        Type
+        <select id="editor-type" value={type} disabled={typeLocked} onChange={e => changeType(e.target.value as TrackerType)}>
+          {(Object.keys(TYPE_LABELS) as TrackerType[]).map(t => (
+            <option key={t} value={t}>{TYPE_LABELS[t]}</option>
+          ))}
+        </select>
+      </label>
+      <p className="small muted">
+        {typeLocked
+          ? "The type can't change once a tracker has entries. Archive it and make a new one instead."
+          : TYPE_HELP[type]}
+      </p>
 
-        <label className="field" htmlFor="edGrp">
-          Group
-          <input id="edGrp" list="grpList" value={group} placeholder="e.g. Symptoms" onChange={e => setGroup(e.target.value)} />
-          <datalist id="grpList">
-            {existingGroups.map(g => <option key={g} value={g!} />)}
-          </datalist>
-        </label>
+      <label className="field">
+        Group
+        <input id="editor-group" list="editor-groups" value={group} placeholder="e.g. Symptoms" onChange={e => setGroup(e.target.value)} />
+        <datalist id="editor-groups">
+          {existingGroups.map(g => <option key={g} value={g} />)}
+        </datalist>
+      </label>
 
-        <div>
-          Color
-          <div className="swatches">
-            {COLORS.map(c => (
-              <button
-                key={c}
-                type="button"
-                data-color={c}
-                style={colorStyle(c)}
-                aria-label={c}
-                aria-pressed={color === c}
-                onClick={() => setColor(c)}
-              />
-            ))}
-          </div>
+      <div>
+        Color
+        <div className="swatches">
+          {COLORS.map(c => (
+            <button
+              key={c}
+              type="button"
+              data-color={c}
+              style={colorStyle(c)}
+              aria-label={c}
+              aria-pressed={color === c}
+              onClick={() => setColor(c)}
+            />
+          ))}
         </div>
+      </div>
 
-        <TypeFields type={type} fields={fields} setField={setField} />
+      <TypeFields type={type} fields={fields} setField={setField} />
 
-        <p className="small error-text" id="edErr">{error}</p>
-        <div className="button-row">
-          <button type="button" className="button primary" id="edSave" onClick={save}>Save</button>
-          <button type="button" className="button" id="edCancel" onClick={onClose}>Cancel</button>
-          {!isNew && <button type="button" className="button danger" id="edArchive" onClick={archive}>Archive</button>}
-        </div>
+      <p className="small error-text" id="editor-error">{error}</p>
+      <div className="button-row">
+        <button type="button" className="button primary" id="editor-save" onClick={save}>Save</button>
+        <button type="button" className="button" id="editor-cancel" onClick={onClose}>Cancel</button>
+        {!isNew && <button type="button" className="button danger" id="editor-archive" onClick={archive}>Archive</button>}
       </div>
     </div>
   );
@@ -177,7 +179,7 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
 interface TypeFieldsProps {
   type: TrackerType;
   fields: ConfigFields;
-  setField: <K extends keyof ConfigFields>(key: K, value: ConfigFields[K]) => void;
+  setField: SetField;
 }
 
 /** The editor fields specific to a tracker type. */
@@ -185,48 +187,48 @@ function TypeFields({ type, fields, setField }: TypeFieldsProps) {
   switch (type) {
     case 'rating':
       return (
-        <label className="field" htmlFor="edLevels">
+        <label className="field">
           Levels, lowest first, one per line (2–10)
-          <textarea id="edLevels" rows={5} value={fields.levels} onChange={e => setField('levels', e.target.value)} />
+          <textarea id="editor-levels" rows={5} value={fields.levels} onChange={e => setField('levels', e.target.value)} />
         </label>
       );
     case 'episode':
       return (
-        <label className="field" htmlFor="edLevels">
+        <label className="field">
           Optional severity levels while it's running, one per line (leave empty for none)
-          <textarea id="edLevels" rows={4} value={fields.levels} onChange={e => setField('levels', e.target.value)} />
+          <textarea id="editor-levels" rows={4} value={fields.levels} onChange={e => setField('levels', e.target.value)} />
         </label>
       );
     case 'number':
       return (
         <div className="field-grid">
-          <label className="field" htmlFor="edUnit">
+          <label className="field">
             Unit
-            <input id="edUnit" value={fields.unit} placeholder="e.g. minutes" onChange={e => setField('unit', e.target.value)} />
+            <input id="editor-unit" value={fields.unit} placeholder="e.g. minutes" onChange={e => setField('unit', e.target.value)} />
           </label>
-          <label className="field" htmlFor="edStep">
+          <label className="field">
             Step
-            <input id="edStep" type="number" step="any" value={fields.step} onChange={e => setField('step', e.target.value)} />
+            <input id="editor-step" type="number" step="any" value={fields.step} onChange={e => setField('step', e.target.value)} />
           </label>
-          <label className="field" htmlFor="edMin">
+          <label className="field">
             Minimum
-            <input id="edMin" type="number" step="any" value={fields.min} onChange={e => setField('min', e.target.value)} />
+            <input id="editor-min" type="number" step="any" value={fields.min} onChange={e => setField('min', e.target.value)} />
           </label>
-          <label className="field" htmlFor="edMax">
+          <label className="field">
             Maximum
-            <input id="edMax" type="number" step="any" value={fields.max} onChange={e => setField('max', e.target.value)} />
+            <input id="editor-max" type="number" step="any" value={fields.max} onChange={e => setField('max', e.target.value)} />
           </label>
         </div>
       );
     case 'choice':
       return (
         <>
-          <label className="field" htmlFor="edOpts">
+          <label className="field">
             Options, one per line
-            <textarea id="edOpts" rows={5} value={fields.options} onChange={e => setField('options', e.target.value)} />
+            <textarea id="editor-options" rows={5} value={fields.options} onChange={e => setField('options', e.target.value)} />
           </label>
           <label className="checkbox-field">
-            <input type="checkbox" id="edMulti" checked={fields.multi}
+            <input type="checkbox" id="editor-multi" checked={fields.multi}
               onChange={e => setField('multi', e.target.checked)} />
             Allow more than one
           </label>

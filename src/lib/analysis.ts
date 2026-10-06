@@ -12,9 +12,9 @@
 // time ("datetime" is "2026-10-03 12:35:26", which spreadsheets read as a date and time); *_utc columns
 // are the exact UTC timestamps. schema.sql builds the same episodes and daily figures as SQL views;
 // keep the two in step (tests/fixtures/analysis.json and both tests pin the results).
-import { MINUTE_MS, clockTime, dayKey, dayStart, pad2, unhandled } from './util';
+import { MINUTE_MS, clockTime, dayKey, dayStart, nextDay, pad2, unhandled } from './util';
 import {
-  allEpisodes, byTime, entryText, entryTime, liveEntries, sortedTrackers,
+  allEpisodes, byTime, entryLabel, entryText, entryTime, liveEntries, sortedTrackers,
   type Data, type Entry, type EntryKind, type Episode, type Tracker,
 } from './model';
 
@@ -26,27 +26,20 @@ export interface Table {
   rows: Cell[][];
 }
 
-/** The kind column, with "value" spelled out as "answer". */
-const EVENT_NAMES: Record<EntryKind, string> = {
-  start: 'start',
-  end: 'end',
-  level: 'level',
-  moment: 'moment',
-  value: 'answer',
-};
-
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const weekday = (ms: number) => WEEKDAYS[new Date(ms).getDay()];
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 /** Local date and time to the second, e.g. "2026-10-03 12:35:26". */
 const localDateTime = (ms: number) => `${dayKey(ms)} ${clockTime(ms)}:${pad2(new Date(ms).getSeconds())}`;
-const average = (values: number[]) => (values.length ? round2(values.reduce((a, b) => a + b, 0) / values.length) : null);
-const sum = (values: number[]) => (values.length ? round2(values.reduce((a, b) => a + b, 0)) : null);
-const joinText = (values: (string | null)[]) => values.filter(Boolean).join(' | ') || null;
-
-/** The day after a "YYYY-MM-DD" day. (30 h past midnight is always the next day, even across DST changes.) */
-const nextDay = (key: string) => dayKey(dayStart(key) + 30 * 60 * MINUTE_MS);
+const total = (numbers: number[]) => numbers.reduce((a, b) => a + b, 0);
+const average = (numbers: number[]) => (numbers.length ? round2(total(numbers) / numbers.length) : null);
+const sum = (numbers: number[]) => (numbers.length ? round2(total(numbers)) : null);
+const joinText = (texts: (string | null)[]) => texts.filter(Boolean).join(' | ') || null;
+/** The entries' values, leaving out entries without one. */
+const valuesOf = (entries: Entry[]) => entries.map(e => e.value).filter((n): n is number => n != null);
+/** Which check-in an answer belongs to. Answers without a check-in id are grouped by time. */
+const checkinKey = (answer: Entry) => answer.checkin_id || 'at ' + answer.occurred_at;
 
 export function buildAnalysisTables(data: Data, now = Date.now()): Table[] {
   const entries = liveEntries(data).sort(byTime);
@@ -99,7 +92,7 @@ function columnNames(trackers: Tracker[]): Map<string, string> {
 function choiceOptions(tracker: Tracker, entries: Entry[]): string[] {
   const options = (tracker.config.options || []).filter(Boolean);
   for (const e of entries) {
-    if (e.tracker_id === tracker.id && e.kind === 'value' && e.txt && !options.includes(e.txt)) options.push(e.txt);
+    if (e.tracker_id === tracker.id && e.kind === 'answer' && e.text && !options.includes(e.text)) options.push(e.text);
   }
   return options;
 }
@@ -110,7 +103,7 @@ function choiceOptions(tracker: Tracker, entries: Entry[]): string[] {
  * A level on the boundary between two episodes (a restart) belongs to the earlier one.
  */
 function linkEpisodes(data: Data, entries: Entry[], episodes: Episode[]) {
-  const trackerSort = (trackerId: string) => data.trackers.get(trackerId)?.sort ?? 0;
+  const trackerSort = (trackerId: string) => data.trackers.get(trackerId)?.sort_order ?? 0;
 
   const levelsByTracker = new Map<string, Entry[]>(); // oldest first, since entries are
   for (const e of entries) {
@@ -175,7 +168,7 @@ function describeDuring(data: Data, episode: Episode, e: Entry): string {
     if (e.id === episode.id) return 'started';
     if (e.id === episode.endEntryId) return 'ended';
     if (e.kind === 'start') return 'restarted';
-    if (e.kind === 'level') return String((e.txt || e.num) ?? '');
+    if (e.kind === 'level') return entryLabel(e);
   }
   return entryText(e, data.trackers.get(e.tracker_id)!);
 }
@@ -203,8 +196,8 @@ function entriesBetween(sorted: Entry[], from: number, to: number): Entry[] {
 function checkinGroups(entries: Entry[]): { key: string; time: number; answers: Entry[] }[] {
   const groups = new Map<string, { key: string; time: number; answers: Entry[] }>();
   for (const e of entries) {
-    if (e.kind !== 'value') continue;
-    const key = e.checkin_id || 'at ' + e.ts; // answers without a check-in id are grouped by time
+    if (e.kind !== 'answer') continue;
+    const key = checkinKey(e);
     if (!groups.has(key)) groups.set(key, { key, time: entryTime(e), answers: [] });
     groups.get(key)!.answers.push(e);
   }
@@ -225,7 +218,7 @@ function trackersTable({ trackers, names }: Context): Table {
       t.name,
       names.get(t.id)!,
       t.type,
-      t.grp || null,
+      t.group_name || null,
       t.archived,
       i + 1,
       t.config.levels?.length ? t.config.levels.map((label, n) => `${n + 1}=${label}`).join('; ') : null,
@@ -251,22 +244,22 @@ function entriesTable({ data, entries, episodeIdByEntry, runningAt }: Context): 
     rows: entries.map(e => {
       const tracker = data.trackers.get(e.tracker_id)!;
       const time = entryTime(e);
-      const isTextAnswer = e.kind === 'value' && tracker.type === 'text';
+      const isTextAnswer = e.kind === 'answer' && tracker.type === 'text';
       return [
         e.id,
         localDateTime(time),
         dayKey(time),
         clockTime(time),
         weekday(time),
-        e.ts,
+        e.occurred_at,
         e.tracker_id,
         tracker.name,
         tracker.type,
-        tracker.grp || null,
-        EVENT_NAMES[e.kind],
-        e.num,                        // rating level, number, or severity level
-        isTextAnswer ? null : e.txt,  // the level's label, or the chosen option
-        isTextAnswer ? e.txt : null,  // free text
+        tracker.group_name || null,
+        e.kind,
+        e.value,                       // rating level, number, or severity level
+        isTextAnswer ? null : e.text,  // the level's label, or the chosen option
+        isTextAnswer ? e.text : null,  // free text
         e.note,
         e.checkin_id,
         episodeIdByEntry.get(e.id) ?? null,
@@ -291,7 +284,7 @@ function episodesTable({ data, entries, episodes, levelsByEpisode, timelineByEpi
     rows: episodes.map(episode => {
       const tracker = data.trackers.get(episode.trackerId)!;
       const levels = levelsByEpisode.get(episode.id)!;
-      const peak = levels.reduce<Entry | null>((best, e) => (!best || (e.num ?? 0) > (best.num ?? 0) ? e : best), null);
+      const peak = levels.reduce<Entry | null>((best, e) => (!best || (e.value ?? 0) > (best.value ?? 0) ? e : best), null);
       const ongoing = episode.status === 'ongoing';
       const related = [entriesById.get(episode.id), episode.endEntryId ? entriesById.get(episode.endEntryId) : undefined, ...levels];
       return [
@@ -301,12 +294,12 @@ function episodesTable({ data, entries, episodes, levelsByEpisode, timelineByEpi
         ongoing ? null : localDateTime(episode.end),
         round1((episode.end - episode.start) / MINUTE_MS), // so far, if ongoing
         episode.status,
-        peak?.num ?? null,
-        peak?.txt ?? null,
+        peak?.value ?? null,
+        peak?.text ?? null,
         timelineByEpisode.get(episode.id)!,
         joinText(related.map(e => e?.note ?? null)),
         episode.trackerId,
-        tracker.grp || null,
+        tracker.group_name || null,
         dayKey(episode.start),
         clockTime(episode.start),
         ongoing ? null : dayKey(episode.end),
@@ -337,19 +330,19 @@ function checkinsTable({ data, entries, trackers, names, runningAt }: Context): 
     switch (tracker.type) {
       case 'rating':
       case 'number':
-        add(name, answers => mine(answers)[0]?.num ?? null);
+        add(name, answers => mine(answers)[0]?.value ?? null);
         break;
       case 'choice':
         // One 1/0 column per option. All blank when the question was skipped in that check-in.
         for (const option of choiceOptions(tracker, entries)) {
           add(`${name}: ${option}`, answers => {
             const picked = mine(answers);
-            return picked.length ? (picked.some(a => a.txt === option) ? 1 : 0) : null;
+            return picked.length ? (picked.some(a => a.text === option) ? 1 : 0) : null;
           });
         }
         break;
       case 'text':
-        add(name, answers => joinText(mine(answers).map(a => a.txt)));
+        add(name, answers => joinText(mine(answers).map(a => a.text)));
         break;
       case 'episode':
       case 'moment':
@@ -379,6 +372,15 @@ function checkinsTable({ data, entries, trackers, names, runningAt }: Context): 
 
 /* ---------- daily ---------- */
 
+/** A figure per day per tracker: day -> trackerId -> amount. */
+type DayFigures = Map<string, Map<string, number>>;
+
+function addToDay(figures: DayFigures, day: string, trackerId: string, amount: number): void {
+  const perTracker = figures.get(day) ?? new Map<string, number>();
+  perTracker.set(trackerId, (perTracker.get(trackerId) ?? 0) + amount);
+  figures.set(day, perTracker);
+}
+
 function dailyTable({ entries, trackers, names, episodes, now }: Context): Table {
   // Every calendar day from the first entry to today, including days with nothing logged.
   const days: string[] = [];
@@ -390,24 +392,14 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
   const entriesByDay = new Map<string, Entry[]>(days.map(day => [day, []]));
   for (const e of entries) entriesByDay.get(dayKey(entryTime(e)))?.push(e);
 
-  const startsByDay = new Map<string, Map<string, number>>(); // day -> trackerId -> episodes started
+  const startsByDay: DayFigures = new Map(); // episodes started
+  const msByDay: DayFigures = new Map();     // time episodes were running, clipped at midnight
   for (const episode of episodes) {
-    const day = dayKey(episode.start);
-    const perTracker = startsByDay.get(day) ?? new Map<string, number>();
-    perTracker.set(episode.trackerId, (perTracker.get(episode.trackerId) ?? 0) + 1);
-    startsByDay.set(day, perTracker);
-  }
-
-  // Minutes each episode was running within each day, clipped at midnight.
-  const minutesByDay = new Map<string, Map<string, number>>(); // day -> trackerId -> ms
-  for (const episode of episodes) {
+    addToDay(startsByDay, dayKey(episode.start), episode.trackerId, 1);
     for (let day = dayKey(episode.start); day <= dayKey(episode.end); day = nextDay(day)) {
       const from = Math.max(episode.start, dayStart(day));
       const to = Math.min(episode.end, dayStart(nextDay(day)));
-      if (to < from) continue;
-      const perTracker = minutesByDay.get(day) ?? new Map<string, number>();
-      perTracker.set(episode.trackerId, (perTracker.get(episode.trackerId) ?? 0) + (to - from));
-      minutesByDay.set(day, perTracker);
+      if (to >= from) addToDay(msByDay, day, episode.trackerId, to - from);
     }
   }
 
@@ -421,37 +413,36 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
   for (const tracker of trackers) {
     const name = names.get(tracker.id)!;
     const mine = (dayEntries: Entry[], kind: EntryKind) => dayEntries.filter(e => e.tracker_id === tracker.id && e.kind === kind);
-    const answerNumbers = (dayEntries: Entry[]) =>
-      mine(dayEntries, 'value').map(e => e.num).filter((n): n is number => n != null);
+    const answerValues = (dayEntries: Entry[]) => valuesOf(mine(dayEntries, 'answer'));
 
     switch (tracker.type) {
       case 'rating':
-        add(`${name} (avg)`, (_, d) => average(answerNumbers(d)));
+        add(`${name} (avg)`, (_, d) => average(answerValues(d)));
         break;
       case 'number':
-        add(`${name} (total)`, (_, d) => sum(answerNumbers(d)));
-        add(`${name} (avg)`, (_, d) => average(answerNumbers(d)));
+        add(`${name} (total)`, (_, d) => sum(answerValues(d)));
+        add(`${name} (avg)`, (_, d) => average(answerValues(d)));
         break;
       case 'choice':
         // How many times each option was picked. All blank on days the question wasn't answered.
         for (const option of choiceOptions(tracker, entries)) {
           add(`${name}: ${option}`, (_, d) => {
-            const picked = mine(d, 'value');
-            return picked.length ? picked.filter(e => e.txt === option).length : null;
+            const picked = mine(d, 'answer');
+            return picked.length ? picked.filter(e => e.text === option).length : null;
           });
         }
         break;
       case 'text':
-        add(`${name} (text)`, (_, d) => joinText(mine(d, 'value').map(e => e.txt)));
+        add(`${name} (text)`, (_, d) => joinText(mine(d, 'answer').map(e => e.text)));
         break;
       case 'episode': {
         add(`${name} (episodes)`, day => startsByDay.get(day)?.get(tracker.id) ?? 0);
-        add(`${name} (minutes)`, day => Math.round((minutesByDay.get(day)?.get(tracker.id) ?? 0) / MINUTE_MS));
+        add(`${name} (minutes)`, day => Math.round((msByDay.get(day)?.get(tracker.id) ?? 0) / MINUTE_MS));
         const hasLevels = (tracker.config.levels || []).length > 0
           || entries.some(e => e.tracker_id === tracker.id && e.kind === 'level');
         if (hasLevels) {
           add(`${name} (max level)`, (_, d) => {
-            const levels = mine(d, 'level').map(e => e.num).filter((n): n is number => n != null);
+            const levels = valuesOf(mine(d, 'level'));
             return levels.length ? Math.max(...levels) : null;
           });
         }
@@ -470,7 +461,7 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
     columns,
     rows: days.map(day => {
       const dayEntries = entriesByDay.get(day)!;
-      const checkins = new Set(dayEntries.filter(e => e.kind === 'value').map(e => e.checkin_id || 'at ' + e.ts));
+      const checkins = new Set(dayEntries.filter(e => e.kind === 'answer').map(checkinKey));
       return [day, weekday(dayStart(day)), checkins.size, ...cellsFor.map(cell => cell(day, dayEntries))];
     }),
   };

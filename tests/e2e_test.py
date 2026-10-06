@@ -46,7 +46,8 @@ class FakeSupabase:
         self.tables = {'trackers': {}, 'entries': {}}
         self.schema_version = 1  # 0 acts like a schema.sql from before versions (the function is missing)
         self.users = {EMAIL: 'u1'}
-        self.tokens = {}
+        self.tokens = {}          # access token -> user id
+        self.refresh_tokens = {}  # refresh token -> user id
         self.clock = 0
 
     def rows(self, table):
@@ -61,6 +62,13 @@ class FakeSupabase:
         # Every write gets a later updated_at, as the server's trigger would give it.
         self.clock += 1
         return (datetime.datetime(2026, 10, 3, 12) + datetime.timedelta(microseconds=self.clock)).isoformat() + '+00:00'
+
+    def new_session(self, user_id, email):
+        token = 'tok-' + uuid.uuid4().hex
+        self.tokens[token] = user_id
+        self.refresh_tokens['r-' + token] = user_id
+        return {'access_token': token, 'refresh_token': 'r-' + token, 'token_type': 'bearer', 'expires_in': 3600,
+                'user': {'id': user_id, 'email': email}}
 
     def handle(self, route):
         """Answers one request from the app (a Playwright route handler)."""
@@ -81,9 +89,13 @@ class FakeSupabase:
         if path == '/auth/v1/verify':
             if body.get('token') != CODE:
                 return 403, {'msg': 'Token has expired or is invalid'}
-            token = 'tok-' + uuid.uuid4().hex
-            self.tokens[token] = self.users[body['email']]
-            return 200, {'access_token': token, 'refresh_token': 'r-' + token, 'expires_in': 3600, 'user': {'email': body['email']}}
+            return 200, self.new_session(self.users[body['email']], body['email'])
+        if path == '/auth/v1/token' and query.get('grant_type') == ['refresh_token']:
+            user_id = self.refresh_tokens.pop(body.get('refresh_token'), None)
+            if not user_id:
+                return 400, {'error_code': 'refresh_token_not_found', 'msg': 'Invalid Refresh Token'}
+            email = next(address for address, id in self.users.items() if id == user_id)
+            return 200, self.new_session(user_id, email)
         if path == '/auth/v1/logout':
             return 204, None
 
@@ -136,7 +148,7 @@ class Phone:
 
     def open(self):
         self.page.goto(APP_URL)
-        expect(self.page.locator('#syncPill')).to_be_visible()
+        expect(self.page.locator('#sync-pill')).to_be_visible()
 
     def locator(self, selector, **options):
         return self.page.locator(selector, **options)
@@ -146,17 +158,17 @@ class Phone:
 
     def connect(self, url=SUPABASE_URL, key=ANON_KEY):
         """Enters a project in Settings → Sync."""
-        self.page.fill('#cfgUrl', url)
-        self.page.fill('#cfgKey', key)
-        self.page.click('#cfgSave')
+        self.page.fill('#project-url', url)
+        self.page.fill('#project-key', key)
+        self.page.click('#project-connect')
 
     def request_code(self, email=EMAIL):
-        self.page.fill('#authEmail', email)
-        self.page.click('#authSend')
+        self.page.fill('#sign-in-email', email)
+        self.page.click('#send-code')
 
     def enter_code(self, code=CODE):
-        self.page.fill('#authCode', code)
-        self.page.click('#authVerify')
+        self.page.fill('#sign-in-code', code)
+        self.page.click('#sign-in')
 
     def wait_for(self, condition, timeout_s=5):
         """Waits until condition() is true or time runs out; the test then asserts it.
@@ -174,7 +186,7 @@ class Phone:
 
 def tracker_names(phone):
     """Tracker names in the order Settings lists them, without the type shown after each."""
-    return phone.locator('#trackerList .tracker-name').evaluate_all('spans => spans.map(s => s.firstChild.textContent.trim())')
+    return phone.locator('#trackers .tracker-name').evaluate_all('spans => spans.map(s => s.firstChild.textContent.trim())')
 
 
 # ---------- the analysis export ----------
@@ -195,7 +207,7 @@ class Export:
 def export_for_analysis(phone):
     phone.go_to('Settings')
     with phone.page.expect_download() as download:
-        phone.page.click('#exportAnalysis')
+        phone.page.click('#export-analysis')
     return Export(download.value)
 
 
@@ -216,7 +228,7 @@ LOAD_FIXTURE = '''async (fixture) => {
     for (const store of ['trackers', 'entries', 'outbox']) tx.objectStore(store).clear();
     fixture.trackers.forEach(t => tx.objectStore('trackers').put(t));
     fixture.entries.forEach(e => tx.objectStore('entries').put(e));
-    tx.objectStore('meta').put({ k: 'seeded', v: true });
+    tx.objectStore('meta').put({ key: 'seeded', value: true });
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });
@@ -293,19 +305,19 @@ def phone1_export(phone1):
 # ---------- phone 1: Today ----------
 
 def test_fresh_phone_has_the_starter_trackers(phone1):
-    expect(phone1.locator('#syncPill')).to_have_text('On this device only')
+    expect(phone1.locator('#sync-pill')).to_have_text('On this device only')
     assert phone1.locator('[data-episode]').count() >= 5
     expect(phone1.locator('[data-episode]', has_text='Headache')).to_have_count(1)
 
 
 def test_start_and_stop_episodes(phone1):
-    tired = phone1.locator('#now .running-pill', has_text='Tired')
+    tired = phone1.locator('#running .running-pill', has_text='Tired')
     phone1.locator('.episode-card .episode-button', has_text='Tired').click()
     expect(tired).to_have_count(1)
 
     phone1.locator('.episode-card .episode-button', has_text='Headache').click()
     phone1.locator('.episode-card.is-running .level-buttons button[data-level="2"]').first.click()
-    expect(phone1.locator('#now')).to_contain_text('Moderate')
+    expect(phone1.locator('#running')).to_contain_text('Moderate')
 
     tired.click()  # tapping a running episode's pill stops it
     expect(tired).to_have_count(0)
@@ -313,7 +325,7 @@ def test_start_and_stop_episodes(phone1):
 
 def test_moments_and_the_days_log(phone1):
     phone1.locator('.moment-button', has_text='Coffee').click()
-    log = phone1.locator('#log')
+    log = phone1.locator('#day-log')
     expect(log).to_contain_text('Coffee')
     expect(log).to_contain_text('Tired ended')
     expect(log).to_contain_text('Headache: Moderate')
@@ -322,7 +334,7 @@ def test_moments_and_the_days_log(phone1):
 
 def test_toast_undo(phone1):
     phone1.locator('.toast button', has_text='Undo').click()
-    expect(phone1.locator('#log')).not_to_contain_text('Coffee')
+    expect(phone1.locator('#day-log')).not_to_contain_text('Coffee')
 
 
 def test_toast_moves_the_entry_earlier(phone1):
@@ -335,7 +347,7 @@ def test_edit_an_entrys_note(phone1):
     phone1.locator('.entry-row', has_text='Coffee').click()
     phone1.locator('.entry-editor input[type=text]').fill('second cup')
     phone1.locator('[data-save-entry]').click()
-    expect(phone1.locator('#log')).to_contain_text('second cup')
+    expect(phone1.locator('#day-log')).to_contain_text('second cup')
     phone1.screenshot('today-light')
 
 
@@ -352,8 +364,8 @@ def test_check_in(phone1):
     phone1.locator('.question', has_text='Journal').locator('textarea').fill('Felt okay after lunch')
     phone1.screenshot('checkin-light')
 
-    phone1.page.click('#ciSave')  # saves and goes back to Today
-    log = phone1.locator('#log')
+    phone1.page.click('#save-checkin')  # saves and goes back to Today
+    log = phone1.locator('#day-log')
     for text in ['Mood: Good', 'Activities: Exercise', 'Activities: Friends', 'Water: 3 glasses', 'Journal: Felt okay']:
         expect(log).to_contain_text(text)
 
@@ -362,32 +374,32 @@ def test_check_in(phone1):
 
 def test_add_a_tracker(phone1):
     phone1.go_to('Settings')
-    phone1.page.click('#addTracker')
-    phone1.page.fill('#edName', 'Stiffness')
-    phone1.page.select_option('#edType', 'number')
-    phone1.page.fill('#edUnit', 'minutes')
-    phone1.page.fill('#edGrp', 'Check-in')
+    phone1.page.click('#add-tracker')
+    phone1.page.fill('#editor-name', 'Stiffness')
+    phone1.page.select_option('#editor-type', 'number')
+    phone1.page.fill('#editor-unit', 'minutes')
+    phone1.page.fill('#editor-group', 'Check-in')
     phone1.locator('[data-color="rose"]').click()
     # Picking a color keeps what's been typed.
-    assert phone1.page.input_value('#edName') == 'Stiffness'
-    assert phone1.page.input_value('#edUnit') == 'minutes'
-    phone1.page.click('#edSave')
-    expect(phone1.locator('#trackerList')).to_contain_text('Stiffness')
+    assert phone1.page.input_value('#editor-name') == 'Stiffness'
+    assert phone1.page.input_value('#editor-unit') == 'minutes'
+    phone1.page.click('#editor-save')
+    expect(phone1.locator('#trackers')).to_contain_text('Stiffness')
 
 
 def test_rename_a_tracker_but_not_change_its_type(phone1):
     phone1.locator('.tracker-list li', has_text='Tired').locator('[data-edit-tracker]').click()
-    expect(phone1.locator('#edType')).to_be_disabled()  # Tired has entries
-    phone1.page.fill('#edName', 'Sleepy')
-    phone1.page.click('#edSave')
-    expect(phone1.locator('#trackerList')).to_contain_text('Sleepy')
+    expect(phone1.locator('#editor-type')).to_be_disabled()  # Tired has entries
+    phone1.page.fill('#editor-name', 'Sleepy')
+    phone1.page.click('#editor-save')
+    expect(phone1.locator('#trackers')).to_contain_text('Sleepy')
 
 
 def test_archive_a_tracker(phone1):
     phone1.locator('.tracker-list li', has_text='Meal').locator('[data-edit-tracker]').click()
-    phone1.page.click('#edArchive')
-    expect(phone1.locator('#trackerList')).not_to_contain_text('Meal')
-    expect(phone1.locator('#archList')).to_contain_text('Meal')
+    phone1.page.click('#editor-archive')
+    expect(phone1.locator('#trackers')).not_to_contain_text('Meal')
+    expect(phone1.locator('#archived-trackers')).to_contain_text('Meal')
 
 
 def test_move_a_tracker_up(phone1):
@@ -401,13 +413,13 @@ def test_move_a_tracker_up(phone1):
 
 
 def test_rating_needs_two_to_ten_levels(phone1):
-    phone1.page.click('#addTracker')
-    phone1.page.fill('#edName', 'X')
-    phone1.page.select_option('#edType', 'rating')
-    phone1.page.fill('#edLevels', 'only one')
-    phone1.page.click('#edSave')
-    expect(phone1.locator('#edErr')).to_contain_text('A rating needs 2 to 10 levels.')
-    phone1.page.click('#edCancel')
+    phone1.page.click('#add-tracker')
+    phone1.page.fill('#editor-name', 'X')
+    phone1.page.select_option('#editor-type', 'rating')
+    phone1.page.fill('#editor-levels', 'only one')
+    phone1.page.click('#editor-save')
+    expect(phone1.locator('#editor-error')).to_contain_text('A rating needs 2 to 10 levels.')
+    phone1.page.click('#editor-cancel')
     phone1.screenshot('settings-light')
 
 
@@ -438,30 +450,30 @@ def test_exported_entries(phone1_export):
 
 def test_plain_http_project_refused(phone1):
     phone1.connect('http://example.com')
-    expect(phone1.locator('#cfgErr')).to_contain_text('should start with https://')
+    expect(phone1.locator('#project-error')).to_contain_text('should start with https://')
 
 
 def test_http_project_on_this_computer_accepted(phone1):
     phone1.connect('http://127.0.0.1:54321')
-    expect(phone1.locator('#authEmail')).to_have_count(1)
-    phone1.page.click('#cfgDisconnect')
+    expect(phone1.locator('#sign-in-email')).to_have_count(1)
+    phone1.page.click('#project-disconnect')
 
 
 def test_sign_in_refuses_unknown_email(phone1):
     phone1.connect()
     phone1.request_code('stranger@example.com')
-    expect(phone1.locator('#authErr')).to_contain_text("isn't a user in this project")
+    expect(phone1.locator('#sign-in-error')).to_contain_text("isn't a user in this project")
 
 
 def test_sign_in_refuses_wrong_code(phone1):
     phone1.request_code()
     phone1.enter_code('000000')
-    expect(phone1.locator('#authErr')).to_contain_text("didn't work")
+    expect(phone1.locator('#sign-in-error')).to_contain_text("didn't work")
 
 
 def test_signing_in_uploads_everything(phone1, supabase, phone1_export):
     phone1.enter_code()
-    expect(phone1.locator('#syncPill')).to_contain_text('Synced')
+    expect(phone1.locator('#sync-pill')).to_contain_text('Synced')
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS
     # Every exported entry, plus the undone coffee: deletes sync as deleted = true.
     assert len(supabase.rows('entries')) == len(phone1_export.tables['entries']) + 1
@@ -471,8 +483,8 @@ def test_signing_in_uploads_everything(phone1, supabase, phone1_export):
 
 def test_changes_from_other_devices_are_pulled(phone1, supabase):
     supabase.rename_tracker('Sleepy', 'Drowsy')
-    phone1.page.click('#syncNow')
-    expect(phone1.locator('#trackerList')).to_contain_text('Drowsy')
+    phone1.page.click('#sync-now')
+    expect(phone1.locator('#trackers')).to_contain_text('Drowsy')
 
 
 def test_offline_entries_wait_then_upload(phone1, supabase):
@@ -480,12 +492,21 @@ def test_offline_entries_wait_then_upload(phone1, supabase):
     phone1.context.set_offline(True)
     phone1.go_to('Today')
     phone1.locator('.moment-button', has_text='Medication').click()
-    expect(phone1.locator('#syncPill')).to_contain_text('Offline')
+    expect(phone1.locator('#sync-pill')).to_contain_text('Offline')
 
     phone1.context.set_offline(False)
     phone1.page.evaluate('window.dispatchEvent(new Event("online"))')
     phone1.wait_for(lambda: len(supabase.rows('entries')) == uploaded + 1)
     assert len(supabase.rows('entries')) == uploaded + 1
+
+
+def test_last_sync_on_an_earlier_day(phone1, supabase):
+    phone1.page.evaluate("localStorage.setItem('logbook.lastSync', String(new Date(2026, 8, 3, 12).getTime()))")
+    supabase.schema_version = 0  # so the sync after reopening fails and leaves that time alone
+    phone1.open()
+    phone1.go_to('Settings')
+    expect(phone1.locator('#sync-panel')).to_contain_text('Last synced on Thu, Sep 3 at')
+    supabase.schema_version = 1
 
 
 # ---------- phone 2: a fresh phone joins the account ----------
@@ -496,15 +517,15 @@ def test_outdated_database_stops_sync(phone2, supabase):
     phone2.request_code()
     supabase.schema_version = 0  # the owner hasn't run the latest schema.sql yet
     phone2.enter_code()
-    expect(phone2.locator('#syncPill')).to_contain_text('Sync problem')
-    expect(phone2.locator('#syncPanel')).to_contain_text('Your Supabase database needs an update')
-    expect(phone2.locator('#trackerList')).not_to_contain_text('Drowsy')
+    expect(phone2.locator('#sync-pill')).to_contain_text('Sync problem')
+    expect(phone2.locator('#sync-panel')).to_contain_text('Your Supabase database needs an update')
+    expect(phone2.locator('#trackers')).not_to_contain_text('Drowsy')
 
 
 def test_fresh_phone_takes_the_accounts_trackers(phone2, supabase):
     supabase.schema_version = 1  # schema.sql run again
-    phone2.page.click('#syncNow')
-    trackers = phone2.locator('#trackerList')
+    phone2.page.click('#sync-now')
+    trackers = phone2.locator('#trackers')
     expect(trackers).to_contain_text('Drowsy')
     expect(trackers).to_contain_text('Stiffness')
     # Its own starter trackers were replaced, not added to the account.
@@ -514,7 +535,7 @@ def test_fresh_phone_takes_the_accounts_trackers(phone2, supabase):
 
 def test_fresh_phone_shows_the_accounts_entries(phone2):
     phone2.go_to('Today')
-    expect(phone2.locator('#log')).to_contain_text('Medication')
+    expect(phone2.locator('#day-log')).to_contain_text('Medication')
     phone2.screenshot('today-dark')
 
 
@@ -523,28 +544,28 @@ def test_fresh_phone_shows_the_accounts_entries(phone2):
 def test_names_are_shown_as_typed_in_settings(phone3):
     phone3.locator('.moment-button', has_text='Coffee').click()  # an entry of this phone's own, for later
     phone3.go_to('Settings')
-    phone3.page.click('#addTracker')
-    phone3.page.fill('#edName', TRICKY_NAME)
-    phone3.page.select_option('#edType', 'moment')
-    phone3.page.click('#edSave')
-    expect(phone3.locator('#trackerList')).to_contain_text(TRICKY_NAME)
-    assert phone3.locator('#trackerList b').count() == 0
+    phone3.page.click('#add-tracker')
+    phone3.page.fill('#editor-name', TRICKY_NAME)
+    phone3.page.select_option('#editor-type', 'moment')
+    phone3.page.click('#editor-save')
+    expect(phone3.locator('#trackers')).to_contain_text(TRICKY_NAME)
+    assert phone3.locator('#trackers b').count() == 0
 
 
 def test_restore_an_archived_tracker(phone3):
     phone3.locator('.tracker-list li', has_text='Bold').locator('[data-edit-tracker]').click()
-    phone3.page.click('#edArchive')
-    phone3.locator('#archWrap summary').click()
-    phone3.locator('#archList [data-restore-tracker]').click()
-    expect(phone3.locator('#trackerList')).to_contain_text(TRICKY_NAME)
+    phone3.page.click('#editor-archive')
+    phone3.locator('#archived-trackers summary').click()
+    phone3.locator('#archived-trackers [data-restore-tracker]').click()
+    expect(phone3.locator('#trackers')).to_contain_text(TRICKY_NAME)
 
 
 def test_names_are_shown_as_typed_on_today(phone3):
     phone3.go_to('Today')
     phone3.locator('.moment-button', has_text='Bold').click()
-    expect(phone3.locator('#marks')).to_contain_text(TRICKY_NAME)
-    expect(phone3.locator('#log')).to_contain_text(TRICKY_NAME)
-    assert phone3.locator('#marks b, #log b, #toastHost b').count() == 0
+    expect(phone3.locator('#moments')).to_contain_text(TRICKY_NAME)
+    expect(phone3.locator('#day-log')).to_contain_text(TRICKY_NAME)
+    assert phone3.locator('#moments b, #day-log b, #toast-host b').count() == 0
 
 
 def test_joining_asks_before_replacing_this_phones_data(phone3, supabase):
@@ -552,19 +573,33 @@ def test_joining_asks_before_replacing_this_phones_data(phone3, supabase):
     phone3.connect()
     phone3.request_code()
     phone3.enter_code()
-    expect(phone3.locator('#syncPanel')).to_contain_text('Your account already has data')
+    expect(phone3.locator('#sync-panel')).to_contain_text('Your account already has data')
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS  # nothing uploaded yet
 
 
 def test_choosing_the_account_replaces_this_phones_data(phone3, supabase):
-    phone3.page.click('#useAccount')
-    expect(phone3.locator('#trackerList')).to_contain_text('Drowsy')
+    phone3.page.click('#use-account-data')
+    expect(phone3.locator('#trackers')).to_contain_text('Drowsy')
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS
 
 
 def test_no_sideways_scrolling(phone1, phone2, phone3):
     for phone in [phone1, phone2, phone3]:
         assert phone.page.evaluate('document.documentElement.scrollWidth') <= 390
+
+
+def test_day_when_the_clocks_go_back_has_25_hours(browser, supabase):
+    coffee = {'id': '00000000-0000-4000-8000-0000000000c1', 'name': 'Coffee', 'type': 'moment', 'group_name': 'Moments',
+              'color': 'amber', 'config': {}, 'sort_order': 10, 'archived': False}
+    late = {'id': '00000000-0000-4000-9000-0000000000c1', 'tracker_id': coffee['id'], 'kind': 'moment',
+            'occurred_at': '2025-11-03T04:30:00.000Z',  # Nov 2, 23:30 in New York, after the clocks went back
+            'value': None, 'text': None, 'note': None, 'checkin_id': None, 'deleted': False}
+    phone = Phone(browser, supabase, timezone='America/New_York')
+    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [coffee], 'entries': [late]})
+    phone.open()
+    phone.page.click('#previous-day')
+    expect(phone.locator('.day-name')).to_contain_text('Sun, Nov 2')
+    expect(phone.locator('#day-log')).to_contain_text('Coffee')
 
 
 # ---------- the analysis export, from known data (schema_test.py checks the same figures in SQL) ----------
