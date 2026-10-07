@@ -1,8 +1,8 @@
-import { MINUTE_MS, formatTime, formatDuration, uuid, unhandled } from './util';
+import { MINUTE_MS, clockTime, formatTime, formatDuration, uuid, unhandled } from './util';
 import { dataStore } from './data';
 import {
   CHECKIN_TYPES, newEntry, entryTime, sortedTrackers, groupName, levelLabel, activeEpisodes, allEpisodes, liveEntries,
-  type Entry, type EntryKind, type Tracker,
+  type Entry, type EntryKind, type Episode, type Tracker,
 } from './model';
 import { addStarterTrackers, eraseDevice, saveEntries, saveEntry, saveTracker } from './store';
 import { sync } from './sync';
@@ -55,9 +55,11 @@ const movedBy = (entry: Entry, ms: number): Entry => ({ ...entry, occurred_at: n
 
 /**
  * True if an episode spanning start to end (null: still going) would take in another start or end of the
- * same tracker, which would pair them up differently. ids are the episode's own start and end.
+ * same tracker, which would pair them up differently. ids are the episode's own start and end. A start at or
+ * after the end counts too: for an episode cut short by a restart, the end is that next start.
  */
 function overlapsAnother(trackerId: string, ids: (string | undefined)[], start: number, end: number | null): boolean {
+  if (end !== null && start >= end) return true;
   return liveEntries(data()).some(e => e.tracker_id === trackerId && (e.kind === 'start' || e.kind === 'end')
     && !ids.includes(e.id) && entryTime(e) >= start && (end === null || entryTime(e) < end));
 }
@@ -99,28 +101,45 @@ export const deleteEntry = safely(async (id: string, message: string) => {
   toast(message);
 });
 
-/** The entry at "HH:MM" on its own day ("" keeps its time). */
+/** The entry at "HH:MM" on its own day. "" or the time it already has keeps it to the second. */
 function atTime(entry: Entry, time: string): Entry {
-  if (!time) return entry;
+  if (!time || time === clockTime(entryTime(entry))) return entry;
   const [hours, minutes] = time.split(':').map(Number);
   const when = new Date(entryTime(entry));
   when.setHours(hours, minutes, 0, 0);
   return { ...entry, occurred_at: when.toISOString() };
 }
 
-/** time is "HH:MM" on the entry's day, or "" to keep it. */
+/** The episode this version of an end entry would close, if any. */
+function episodeEndedBy(end: Entry): Episode | undefined {
+  const entries = new Map(data().entries).set(end.id, end);
+  return allEpisodes({ ...data(), entries }).find(e => e.endEntryId === end.id);
+}
+
+/** time is "HH:MM" on the entry's day, or "" to keep it. An end that belongs to no episode can't be moved into one. */
 export const editEntry = safely(async (id: string, time: string, note: string) => {
   const entry = data().entries.get(id);
-  if (entry) await saveEntry({ ...atTime(entry, time), note: note.trim() || null });
+  if (!entry) return false;
+  const edited = { ...atTime(entry, time), note: note.trim() || null };
+  const ended = entry.kind === 'end' && !episodeEndedBy(entry) ? episodeEndedBy(edited) : undefined;
+  if (ended) {
+    toast(`That would end the ${trackerById(entry.tracker_id).name} that started at ${formatTime(ended.start)}.`);
+    return false;
+  }
+  await saveEntry(edited);
+  return true;
 });
 
-/** An episode's start and end times ("HH:MM", each on its own day) and its note, which is the start's. */
+/**
+ * An episode's start and end times ("HH:MM", each on its own day) and its note, which is kept on the start.
+ * The editor shows an end's note (say, from another phone) with it, so saving moves that to the start too.
+ */
 export const editEpisode = safely(async (startId: string, startTime: string, note: string, endId?: string, endTime: string = '') => {
   const start = data().entries.get(startId);
   if (!start) return false;
   const end = endId ? data().entries.get(endId) : undefined;
   const changed = [{ ...atTime(start, startTime), note: note.trim() || null }];
-  if (end) changed.push(atTime(end, endTime));
+  if (end) changed.push({ ...atTime(end, endTime), note: null });
   if (end && entryTime(changed[1]) <= entryTime(changed[0])) {
     toast('The end has to be after the start.');
     return false;

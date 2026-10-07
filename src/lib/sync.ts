@@ -43,7 +43,7 @@ let statusDetail = '';
 let running = false;
 let runAgain = false;
 let writeTimer: ReturnType<typeof setTimeout> | undefined;
-let schemaChecked = false; // once per app session; "Sync now" after an error checks again
+let schemaChecked = false; // once per app session and project; "Sync now" after an error checks again
 
 const listeners = new Set<() => void>();
 let snapshot = buildSnapshot();
@@ -136,16 +136,22 @@ async function flushOutbox(): Promise<void> {
 
 const cursorKey = (table: Table) => 'cursor:' + table;
 
+/** The last row pulled. Its id tells apart rows that share an updated_at, as all rows changed by one update do. */
+interface Cursor { updatedAt: string; id: string }
+
 /** Downloads rows changed since the last pull. Returns true if anything on this device changed. */
 async function pullChanges(): Promise<boolean> {
   let changed = false;
   for (const table of TABLES) {
-    let cursor = (await db.getMeta<string>(cursorKey(table))) || '1970-01-01T00:00:00Z';
+    // Earlier builds saved just the updated_at. With the lowest id, it still takes in every row that has it.
+    const saved = await db.getMeta<Cursor | string>(cursorKey(table));
+    let cursor = typeof saved === 'string' ? { updatedAt: saved, id: '00000000-0000-0000-0000-000000000000' } : saved;
     while (true) {
-      const rows: Record<string, unknown>[] = (await check(supabase().from(table)
-        .select('*')
-        .gte('updated_at', cursor)
+      let query = supabase().from(table).select('*');
+      if (cursor) query = query.or(`updated_at.gt.${cursor.updatedAt},and(updated_at.eq.${cursor.updatedAt},id.gt.${cursor.id})`);
+      const rows: Record<string, unknown>[] = (await check(query
         .order('updated_at', { ascending: true })
+        .order('id', { ascending: true })
         .limit(PULL_PAGE))) ?? [];
 
       const updated: (Tracker | Entry)[] = [];
@@ -170,7 +176,8 @@ async function pullChanges(): Promise<boolean> {
       }
 
       if (rows.length) {
-        cursor = String(rows[rows.length - 1].updated_at);
+        const last = rows[rows.length - 1];
+        cursor = { updatedAt: String(last.updated_at), id: String(last.id) };
         await db.setMeta(cursorKey(table), cursor);
       }
       if (rows.length < PULL_PAGE) break;
@@ -199,7 +206,7 @@ async function checkSchema(): Promise<void> {
  * has entries of its own, the owner is asked first (status needsChoice).
  */
 async function linkAccount(): Promise<void> {
-  const accountTrackers = await check(supabase().from('trackers').select('id').limit(1));
+  const accountTrackers = await check(supabase().from('trackers').select('id').eq('deleted', false).limit(1));
   if (accountTrackers?.length) {
     const localEntryCount = [...entries.values()].filter(e => !e.deleted).length;
     if (localEntryCount > 0 && !(await db.getMeta<boolean>('replaceConfirmed'))) {
@@ -267,12 +274,14 @@ async function run(): Promise<void> {
   }
 }
 
-/** Signs out on the server too. Throws if that fails (say, offline), leaving the person signed in. */
+/** Signs out on the server too, so it needs a connection. */
 async function signOut(): Promise<void> {
+  if (!navigator.onLine) throw new Error('Signing out needs a connection.');
   leaving = true;
   try {
     const { error } = await supabase().auth.signOut();
-    if (error) throw error;
+    // supabase-js forgets the session even when the server call fails, and then this phone is signed out all the same.
+    if (error && session) throw error;
   } finally {
     leaving = false;
   }
@@ -352,20 +361,25 @@ export const sync = {
     if (key.length < 20) throw new Error('That key looks too short. Copy the full anon or publishable key.');
     project = { url, key };
     prefs.set('project', project);
+    schemaChecked = false;
     openClient();
     setStatus('signedout');
   },
 
-  /** Marks every tracker and entry in the account deleted, including ones this phone hasn't downloaded yet. */
+  /**
+   * Marks every tracker and entry in the account deleted, including ones this phone hasn't downloaded yet.
+   * Trackers go first: an entry whose tracker is deleted counts as deleted, so once they're done, so is the reset.
+   */
   async deleteAccountData(): Promise<void> {
     if (!session) throw new Error('Sign in first.');
+    if (status === 'needsSchema') throw new Error('Your Supabase project needs updating first (see Sync).');
     try {
-      await check(supabase().from('entries').update({ deleted: true }).eq('deleted', false));
       await check(supabase().from('trackers').update({ deleted: true }).eq('deleted', false));
     } catch (error) {
       if (!navigator.onLine || isNetworkFailure(error)) throw new Error('Resetting everywhere needs a connection. Nothing was changed.');
       throw error;
     }
+    await supabase().from('entries').update({ deleted: true }).eq('deleted', false); // tidying up, so a failure doesn't matter
   },
 
   /** Forgets the project. Signs out on the server if it can; offline, the session is forgotten here anyway. */
@@ -383,6 +397,7 @@ export const sync = {
     authSubscription = null;
     session = null;
     project = null;
+    schemaChecked = false;
     prefs.set('project', null);
     setStatus('local', '');
     await resetCursors();

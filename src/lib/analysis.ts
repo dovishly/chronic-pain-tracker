@@ -2,7 +2,7 @@
 // The views in schema.sql must give the same episodes and daily figures.
 import { MINUTE_MS, clockTime, dayKey, dayStart, nextDay, pad2, unhandled } from './util';
 import {
-  allEpisodes, byTime, entryLabel, entryText, entryTime, liveEntries, sortedTrackers,
+  allEpisodes, byTime, checkinKey, entryLabel, entryText, entryTime, liveEntries, sortedTrackers,
   type Data, type Entry, type EntryKind, type Episode, type Tracker,
 } from './model';
 
@@ -25,8 +25,6 @@ const average = (numbers: number[]) => (numbers.length ? round2(total(numbers) /
 const sum = (numbers: number[]) => (numbers.length ? round2(total(numbers)) : null);
 const joinText = (texts: (string | null)[]) => texts.filter(Boolean).join(' | ') || null;
 const valuesOf = (entries: Entry[]) => entries.map(e => e.value).filter((n): n is number => n != null);
-/** Which check-in an answer belongs to. Answers without a check-in id are grouped by time. */
-const checkinKey = (answer: Entry) => answer.checkin_id || 'at ' + answer.occurred_at;
 
 export function buildAnalysisTables(data: Data, now = Date.now()): Table[] {
   const entries = liveEntries(data).sort(byTime);

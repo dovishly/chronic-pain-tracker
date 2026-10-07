@@ -75,6 +75,24 @@ drop trigger if exists entries_touch on public.entries;
 create trigger entries_touch before insert or update on public.entries
   for each row execute function public.touch_updated_at();
 
+-- ---------- A deletion is final ----------
+-- So an upload from a phone that hadn't heard of it yet (a tracker reordered offline, say) can't bring the row back.
+
+create or replace function public.keep_deleted()
+returns trigger language plpgsql as $$
+begin
+  new.deleted := new.deleted or old.deleted;
+  return new;
+end $$;
+
+drop trigger if exists trackers_keep_deleted on public.trackers;
+create trigger trackers_keep_deleted before update on public.trackers
+  for each row execute function public.keep_deleted();
+
+drop trigger if exists entries_keep_deleted on public.entries;
+create trigger entries_keep_deleted before update on public.entries
+  for each row execute function public.keep_deleted();
+
 -- ---------- Security: only the signed-in owner can see or change a row ----------
 
 alter table public.trackers enable row level security;

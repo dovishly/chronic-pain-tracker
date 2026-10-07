@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from 'react';
 import { useData } from '../../hooks';
 import { MINUTE_MS, clockTime, dayKey, dayLabel, dayStart, formatDuration, formatTime, nextDay, startedAt } from '../../lib/util';
 import {
-  allEpisodes, daysWithEntries, entryLabel, entryText, entryTime, liveEntries, sortedTrackers,
+  allEpisodes, checkinKey, daysWithEntries, entryLabel, entryText, entryTime, liveEntries, sortedTrackers,
   type Data, type Entry, type Episode,
 } from '../../lib/model';
 import { deleteEntry, deleteEpisode, editEntry, editEpisode } from '../../lib/actions';
@@ -102,8 +102,6 @@ function DayTotals({ bounds, entries, episodes }: { bounds: DayBounds; entries: 
 }
 
 /* ---------- rows ---------- */
-
-const checkinKey = (answer: Entry) => answer.checkin_id || 'at ' + answer.occurred_at;
 
 /**
  * One row of the timeline, newest first. An episode is one row, where it started (or at the bottom, if it
@@ -414,10 +412,11 @@ function episodeText(episode: Episode, name: string, bounds: DayBounds): string 
 /** An episode's start and end times, each on its own day, and its note; or delete the whole episode. */
 function EpisodeEditor({ episode, onDone }: { episode: Episode; onDone: () => void }) {
   const data = useData();
-  const startNote = data.entries.get(episode.id)?.note;
+  // Shown together, as on the row; saving keeps the note on the start.
+  const notes = [episode.id, episode.endEntryId].map(id => (id ? data.entries.get(id)?.note : null)).filter(Boolean);
   const [start, setStart] = useState(() => clockTime(episode.start));
   const [end, setEnd] = useState(() => (episode.endEntryId ? clockTime(episode.end) : ''));
-  const [note, setNote] = useState(startNote || '');
+  const [note, setNote] = useState(() => notes.join(' · '));
 
   const save = async () => {
     if (await editEpisode(episode.id, start, note, episode.endEntryId, end)) onDone();
@@ -454,9 +453,8 @@ function EntryEditor({ entry, onDone }: { entry: Entry; onDone: () => void }) {
   const [time, setTime] = useState(() => clockTime(entryTime(entry)));
   const [note, setNote] = useState(entry.note || '');
 
-  const save = () => {
-    onDone();
-    editEntry(entry.id, time, note);
+  const save = async () => {
+    if (await editEntry(entry.id, time, note)) onDone();
   };
   const remove = () => {
     onDone();

@@ -265,15 +265,31 @@ def test_daily_summary_leaves_out_deleted(daily):
 
 def test_views_leave_out_deleted_trackers(cur):
     # Coffee's entries aren't marked deleted, as when a phone logged one before hearing of the deletion.
-    with signed_in_as(cur, USER_1):
+    # Rolled back afterwards, since a deletion can't be undone.
+    with signed_in_as(cur, USER_1), cur.connection.transaction(force_rollback=True):
         cur.execute("update public.trackers set deleted = true where name = 'Coffee'")
-        try:
-            for view in ANALYSIS_VIEWS:
-                assert 'Coffee' not in {row['tracker'] for row in rows(cur, f'select tracker from public.{view}')}, view
-            timeline = rows(cur, 'select timeline from public.episodes_readable where episode_id = %s', (HEADACHE_SEP1,))
-            assert 'Coffee' not in timeline[0]['timeline']
-        finally:
-            cur.execute("update public.trackers set deleted = false where name = 'Coffee'")
+        for view in ANALYSIS_VIEWS:
+            assert 'Coffee' not in {row['tracker'] for row in rows(cur, f'select tracker from public.{view}')}, view
+        timeline = rows(cur, 'select timeline from public.episodes_readable where episode_id = %s', (HEADACHE_SEP1,))
+        assert 'Coffee' not in timeline[0]['timeline']
+
+
+def test_a_deletion_is_final(cur):
+    # A phone that hadn't heard of the deletions uploads its own copies, as the app does (an upsert of the whole row).
+    upsert_tracker = ('insert into public.trackers (id, name, type, sort_order, deleted) values (%s, %s, %s, %s, false) '
+                      'on conflict (id) do update set name = excluded.name, sort_order = excluded.sort_order, deleted = excluded.deleted')
+    upsert_entry = ('insert into public.entries (id, tracker_id, occurred_at, kind, note, deleted) values (%s, %s, %s, %s, %s, false) '
+                    'on conflict (id) do update set note = excluded.note, deleted = excluded.deleted')
+    coffee = next(t for t in FIXTURE['trackers'] if t['name'] == 'Coffee')
+    deleted_coffee = next(e for e in FIXTURE['entries'] if e['id'] == DELETED_COFFEE)
+    with signed_in_as(cur, USER_1), cur.connection.transaction(force_rollback=True):
+        cur.execute("update public.trackers set deleted = true where name = 'Coffee'")
+        cur.execute(upsert_tracker, (coffee['id'], 'Coffee', 'moment', 99))
+        cur.execute(upsert_entry, (DELETED_COFFEE, deleted_coffee['tracker_id'], deleted_coffee['occurred_at'], deleted_coffee['kind'], 'stale'))
+        tracker = rows(cur, 'select sort_order, deleted from public.trackers where id = %s', (coffee['id'],))[0]
+        assert tracker == {'sort_order': 99, 'deleted': True}  # the rest of the edit still lands
+        entry = rows(cur, 'select note, deleted from public.entries where id = %s', (DELETED_COFFEE,))[0]
+        assert entry == {'note': 'stale', 'deleted': True}
 
 
 # ---------- row-level security ----------

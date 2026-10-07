@@ -31,7 +31,8 @@ SCREENSHOTS = os.path.join(ROOT, 'tests', 'screenshots')
 APP_URL = 'http://127.0.0.1:8765/index.html'
 SUPABASE_URL = 'https://mock.supabase.co'
 ANON_KEY = 'anon-key-0123456789abcdefghij'
-EMAIL = 'me@example.com'   # the only account in the fake Supabase
+EMAIL = 'me@example.com'   # the account in the fake Supabase that most tests use
+OTHER_EMAIL = 'other@example.com'  # a second account there
 PASSWORD = 'correct horse battery staple'  # the account's password
 CODE = '123456'            # the sign-in code it always accepts; each email also has a one-time link
 # The schema version the app needs; the fake database reports it once "schema.sql has been run".
@@ -48,7 +49,7 @@ class FakeSupabase:
     def __init__(self):
         self.tables = {'trackers': {}, 'entries': {}}
         self.schema_version = APP_SCHEMA_VERSION  # 0 acts like a schema.sql from before versions (the function is missing)
-        self.users = {EMAIL: 'u1'}
+        self.users = {EMAIL: 'u1', OTHER_EMAIL: 'u2'}
         self.links = {}           # token in an emailed sign-in link -> email address
         self.last_link = None     # the link in the latest email
         self.tokens = {}          # access token -> user id
@@ -136,17 +137,18 @@ class FakeSupabase:
             return 201, None
 
         rows = [row for row in self.rows(table) if row['user_id'] == user_id]
-        if method == 'PATCH':  # update, filtered by column=eq.value
-            filters = {column: values[0].removeprefix('eq.') for column, values in query.items() if values[0].startswith('eq.')}
+        filters = {column: values[0].removeprefix('eq.') for column, values in query.items() if values[0].startswith('eq.')}
+        rows = [row for row in rows if all(json.dumps(row.get(column)) == value or str(row.get(column)) == value
+                                           for column, value in filters.items())]
+        if method == 'PATCH':  # update, filtered by column=eq.value; one updated_at for all, as in one transaction
             updated_at = self.now()
             for row in rows:
-                if all(json.dumps(row.get(column)) == value or str(row.get(column)) == value for column, value in filters.items()):
-                    self.tables[table][row['id']] = {**row, **body, 'updated_at': updated_at}
+                self.tables[table][row['id']] = {**row, **body, 'updated_at': updated_at}
             return 204, None
-        if 'updated_at' in query:  # gte.<cursor> or gt.<cursor>
-            op, cursor = query['updated_at'][0].split('.', 1)
-            rows = [row for row in rows if (row['updated_at'] >= cursor if op == 'gte' else row['updated_at'] > cursor)]
-        rows.sort(key=lambda row: row['updated_at'])
+        if 'or' in query:  # the rows after the pull's cursor (an updated_at, and the id of the last row that had it)
+            cursor = re.fullmatch(r'\(updated_at\.gt\.(.+),and\(updated_at\.eq\.\1,id\.gt\.(.+)\)\)', query['or'][0]).groups()
+            rows = [row for row in rows if (row['updated_at'], row['id']) > cursor]
+        rows.sort(key=lambda row: (row['updated_at'], row['id']))
         rows = rows[:int(query.get('limit', ['1000'])[0])]
         if query.get('select', ['*'])[0] == 'id':
             rows = [{'id': row['id']} for row in rows]
@@ -570,6 +572,24 @@ def test_changes_from_other_devices_are_pulled(phone1, supabase):
     expect(phone1.locator('#trackers')).to_contain_text('Drowsy')
 
 
+def test_pull_reads_a_cursor_saved_by_an_earlier_build(phone1):
+    # Earlier builds saved just the updated_at; the pull now saves the id of the last row with it.
+    in_meta = '''([key, value]) => new Promise((resolve, reject) => {
+      const request = indexedDB.open('logbook');
+      request.onsuccess = () => {
+        const store = request.result.transaction('meta', 'readwrite').objectStore('meta');
+        const call = value === undefined ? store.get(key) : store.put({ key, value });
+        call.onsuccess = () => { request.result.close(); resolve(value === undefined ? call.result?.value ?? null : null); };
+        call.onerror = () => reject(call.error);
+      };
+      request.onerror = () => reject(request.error);
+    })'''
+    phone1.page.evaluate(in_meta, ['cursor:entries', '2026-10-03T12:00:00+00:00'])
+    phone1.page.click('#sync-now')
+    phone1.wait_for(lambda: isinstance(phone1.page.evaluate(in_meta, ['cursor:entries']), dict))
+    assert set(phone1.page.evaluate(in_meta, ['cursor:entries'])) == {'updatedAt', 'id'}
+
+
 def test_offline_entries_wait_then_upload(phone1, supabase):
     uploaded = len(supabase.rows('entries'))
     phone1.context.set_offline(True)
@@ -581,6 +601,16 @@ def test_offline_entries_wait_then_upload(phone1, supabase):
     phone1.page.evaluate('window.dispatchEvent(new Event("online"))')
     phone1.wait_for(lambda: len(supabase.rows('entries')) == uploaded + 1)
     assert len(supabase.rows('entries')) == uploaded + 1
+
+
+def test_signing_out_needs_a_connection(phone1):
+    phone1.go_to('Settings')
+    phone1.context.set_offline(True)
+    phone1.page.click('#sign-out')
+    expect(phone1.locator('.toast')).to_contain_text('Signing out needs a connection.')
+    expect(phone1.locator('#sync-panel')).to_contain_text('Signed in as')
+    phone1.context.set_offline(False)
+    browser_errors[:] = [e for e in browser_errors if 'Signing out needs a connection' not in e]  # logged by the toast
 
 
 def test_last_sync_on_an_earlier_day(phone1, supabase):
@@ -743,9 +773,56 @@ def test_reset_everywhere(phone1, phone3, supabase):
     assert phone1.locator('#trackers').inner_text().count('Headache') == 1
 
 
+def test_another_project_gets_its_schema_checked(phone1, supabase):
+    # Connecting a project in the same session as another: this one may not have Logbook's tables yet.
+    phone1.page.click('#sign-out')
+    phone1.page.click('#project-disconnect')
+    supabase.schema_version = 0
+    phone1.connect()
+    phone1.sign_in()
+    expect(phone1.locator('#sync-pill')).to_contain_text('Action needed')
+    supabase.schema_version = APP_SCHEMA_VERSION
+    phone1.page.click('#sync-now')
+    expect(phone1.locator('#sync-pill')).to_contain_text('Synced')
+
+
+def test_pull_gets_past_more_rows_than_a_page_changed_at_once(phone1, supabase):
+    # One update of many rows, like Reset everywhere's, gives them all the same updated_at. A page's worth
+    # of them mustn't keep the pull from reaching the rows after them.
+    coffee = next(row for row in supabase.rows('trackers') if row['user_id'] == 'u1' and row['name'] == 'Coffee' and not row['deleted'])
+    updated_at = supabase.now()
+    def row(id, deleted, note=None):
+        return {'id': id, 'user_id': 'u1', 'tracker_id': coffee['id'], 'kind': 'moment', 'value': None, 'text': None,
+                'occurred_at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'note': note, 'checkin_id': None,
+                'deleted': deleted, 'updated_at': updated_at}
+    for n in range(1000):
+        supabase.tables['entries'][f'00000000-0000-4000-a000-{n:012d}'] = row(f'00000000-0000-4000-a000-{n:012d}', True)
+    last = 'ffffffff-ffff-4fff-bfff-ffffffffffff'  # sorts after the others, so it's on the second page
+    supabase.tables['entries'][last] = row(last, False, 'after a thousand')
+    phone1.page.click('#sync-now')
+    phone1.go_to('Today')
+    expect(phone1.locator('#day-log')).to_contain_text('after a thousand')
+
+
 def test_no_sideways_scrolling(phone1, phone2, phone3):
     for phone in [phone1, phone2, phone3]:
         assert phone.page.evaluate('document.documentElement.scrollWidth') <= 390
+
+
+def test_an_account_with_only_deleted_trackers_counts_as_empty(browser, supabase):
+    # So a phone joining it keeps its own trackers and entries, without asking.
+    old = '00000000-0000-4000-8000-0000000000a1'
+    supabase.tables['trackers'][old] = {'id': old, 'user_id': 'u2', 'name': 'Old', 'type': 'moment', 'group_name': None,
+                                        'color': 'slate', 'config': {}, 'sort_order': 0, 'archived': False,
+                                        'deleted': True, 'updated_at': supabase.now()}
+    phone = Phone(browser, supabase)
+    phone.locator('.moment-button', has_text='Coffee').click()
+    phone.go_to('Settings')
+    phone.connect()
+    phone.sign_in(email=OTHER_EMAIL)
+    expect(phone.locator('#sync-pill')).to_contain_text('Synced')
+    expect(phone.locator('#trackers')).to_contain_text('Coffee')
+    assert len([row for row in supabase.rows('entries') if row['user_id'] == 'u2']) == 1  # its coffee went up
 
 
 def test_day_timeline_shows_gaps_and_overnight_episodes(browser, supabase):
@@ -855,6 +932,52 @@ def test_moving_an_episode_earlier_keeps_it_whole(browser, supabase):
     expect(phone.locator('.toast')).to_contain_text('That would overlap another Pain.')
     expect(running).to_contain_text('Pain')
     expect(phone.locator('#day-log .entry-row.is-episode', has_text='Pain')).to_have_count(2)
+
+
+def test_editing_episodes_keeps_them_whole(browser, supabase):
+    def tracker(n, name):
+        return {'id': f'00000000-0000-4000-8000-0000000000b{n}', 'name': name, 'type': 'episode', 'group_name': None,
+                'color': 'amber', 'config': {}, 'sort_order': n * 10, 'archived': False}
+    headache, pain = tracker(1, 'Headache'), tracker(2, 'Pain')
+    def entry(n, of, kind, utc, note=None):
+        return {'id': f'00000000-0000-4000-9000-0000000000b{n}', 'tracker_id': of['id'], 'kind': kind, 'occurred_at': utc,
+                'value': None, 'text': None, 'note': note, 'checkin_id': None, 'deleted': False}
+    entries = [  # Nov 13, 2025, New York (UTC-5)
+        entry(1, headache, 'end', '2025-11-13T13:00:00.000Z'),    # 8:00, with no start before it
+        entry(2, headache, 'start', '2025-11-13T14:00:00.000Z'),  # 9:00, cut short by the next start
+        entry(3, headache, 'start', '2025-11-13T15:00:00.000Z'),  # 10:00, still going
+        entry(4, pain, 'start', '2025-11-13T19:00:10.000Z'),      # 14:00:10
+        entry(5, pain, 'end', '2025-11-13T19:00:50.000Z', note='took ibuprofen'),  # 14:00:50, in the same minute
+    ]
+    phone = Phone(browser, supabase, timezone='America/New_York')
+    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [headache, pain], 'entries': entries})
+    phone.open()
+    phone.page.click('#previous-day')
+    expect(phone.locator('.day-name')).to_contain_text('Thu, Nov 13')
+    log, toast = phone.locator('#day-log'), phone.locator('.toast')
+
+    # The 9:00 Headache can't move past the one that cut it short.
+    phone.locator('.entry-row.is-episode', has_text='until 10:00 AM').click()
+    phone.locator('.entry-editor input[type=time]').first.fill('11:00')
+    phone.locator('[data-save-entry]').click()
+    expect(toast).to_contain_text('That would overlap another Headache.')
+
+    # An end that belongs to no episode can't be moved into one.
+    phone.locator('.entry-row', has_text='Headache ended').click()
+    phone.locator('.entry-editor input[type=time]').fill('09:30')
+    phone.locator('[data-save-entry]').click()
+    expect(toast).to_contain_text('That would end the Headache that started at 9:00 AM.')
+    expect(log).to_contain_text('Headache · until 10:00 AM')
+
+    # Pain began and ended within a minute, and its note, kept on its end, can still be changed.
+    phone.locator('.entry-row.is-episode', has_text='Pain').click()
+    note = phone.locator('.entry-editor input[type=text]')
+    expect(note).to_have_value('took ibuprofen')
+    note.fill('better after lunch')
+    phone.locator('[data-save-entry]').click()
+    expect(phone.locator('.entry-editor')).to_have_count(0)
+    expect(log).to_contain_text('better after lunch')
+    expect(log).not_to_contain_text('took ibuprofen')
 
 
 def test_day_when_the_clocks_go_back_has_25_hours(browser, supabase):

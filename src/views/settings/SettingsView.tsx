@@ -90,7 +90,7 @@ function StartOver() {
   const { signedIn } = useSyncState();
   const [confirming, setConfirming] = useState<'device' | 'everywhere' | null>(null);
   const cancel = (
-    <button type="button" className="button" id="reset-cancel" onClick={() => setConfirming(null)}>Cancel</button>
+    <button type="button" className="button" onClick={() => setConfirming(null)}>Cancel</button>
   );
 
   return (

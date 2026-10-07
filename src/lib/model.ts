@@ -185,6 +185,9 @@ export function daysWithEntries(data: Data): string[] {
 /** A level's or answer's label, or its number when it has none. */
 export const entryLabel = (entry: Entry) => String((entry.text || entry.value) ?? '');
 
+/** Which check-in an answer belongs to. Answers without a check-in id are grouped by time. */
+export const checkinKey = (answer: Entry) => answer.checkin_id || 'at ' + answer.occurred_at;
+
 /** One line describing an entry, e.g. "Headache: Moderate" or "Water: 3 glasses". */
 export function entryText(entry: Entry, tracker: Tracker): string {
   const name = tracker.name;

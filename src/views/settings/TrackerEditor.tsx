@@ -196,7 +196,7 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
           </p>
           <div className="button-row">
             <button type="button" className="button danger" id="editor-delete-confirm" onClick={remove}>Delete for good</button>
-            <button type="button" className="button" id="editor-delete-cancel" onClick={() => setConfirmingDelete(false)}>Keep it</button>
+            <button type="button" className="button" onClick={() => setConfirmingDelete(false)}>Keep it</button>
           </div>
         </div>
       )}
