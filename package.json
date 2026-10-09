@@ -1,0 +1,33 @@
+{
+  "name": "logbook",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && python3 -m pytest tests",
+    "test:e2e": "npm run build && python3 -m pytest tests/e2e_test.py",
+    "test:schema": "python3 -m pytest tests/schema_test.py",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:user": "node scripts/local-user.mjs",
+    "db:apply": "docker exec -i -e PGOPTIONS='-c client_min_messages=warning' supabase_db_tracker psql -U postgres -v ON_ERROR_STOP=1 -q < schema.sql"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.117.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.2",
+    "vite-plugin-pwa": "2.0.0"
+  }
+}
