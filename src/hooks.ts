@@ -1,13 +1,15 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import type { Store } from './lib/util';
 import { dataStore } from './lib/data';
-import { sync } from './lib/sync';
+import { syncState } from './lib/sync';
 import { toastStore } from './lib/toast';
 
-export const useData = () => useSyncExternalStore(dataStore.subscribe, dataStore.get);
+/** A store's current value, re-rendering when it changes. */
+const useStore = <T>(store: Store<T>) => useSyncExternalStore(store.subscribe, store.get);
 
-export const useSyncState = () => useSyncExternalStore(sync.subscribe, sync.get);
-
-export const useToast = () => useSyncExternalStore(toastStore.subscribe, toastStore.get);
+export const useData = () => useStore(dataStore);
+export const useSyncState = () => useStore(syncState);
+export const useToast = () => useStore(toastStore);
 
 /** Date.now(), re-rendering every intervalMs and when the app returns to the foreground. */
 export function useNow(intervalMs: number): number {

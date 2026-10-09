@@ -6,8 +6,8 @@ Supabase REST/Auth API in-process, so no real project or network is needed.
 Most tests run in order and build on each other, like one person using the app: the first phone logs
 entries and changes settings, then signs in to the fake Supabase; a second and a third phone link to
 the same account. So when one fails, look at the first failure: the ones after it may only be
-following on. The analysis export tests at the end stand alone: they load known data
-(tests/fixtures/analysis.json) into a fourth phone and check the same figures as schema_test.py.
+following on. The tests after the third phone stand alone, each with a new phone and known data:
+the analysis export tests at the end load tests/fixtures/analysis.json.
 
 Run:  pip install pytest playwright && python -m playwright install chromium
       npm run test:e2e        (builds, then runs this file)
@@ -33,8 +33,7 @@ SUPABASE_URL = 'https://mock.supabase.co'
 ANON_KEY = 'anon-key-0123456789abcdefghij'
 EMAIL = 'me@example.com'   # the account in the fake Supabase that most tests use
 OTHER_EMAIL = 'other@example.com'  # a second account there
-PASSWORD = 'correct horse battery staple'  # the account's password
-CODE = '123456'            # the sign-in code it always accepts; each email also has a one-time link
+PASSWORD = 'correct horse battery staple'  # both accounts' password
 # The schema version the app needs; the fake database reports it once "schema.sql has been run".
 APP_SCHEMA_VERSION = int(re.search(r'const SCHEMA_VERSION = (\d+);', open(os.path.join(ROOT, 'src', 'lib', 'sync.ts')).read()).group(1))
 ACCOUNT_TRACKERS = 16      # the 15 starter trackers plus Stiffness, added on the first phone
@@ -50,8 +49,6 @@ class FakeSupabase:
         self.tables = {'trackers': {}, 'entries': {}}
         self.schema_version = APP_SCHEMA_VERSION  # 0 acts like a schema.sql from before versions (the function is missing)
         self.users = {EMAIL: 'u1', OTHER_EMAIL: 'u2'}
-        self.links = {}           # token in an emailed sign-in link -> email address
-        self.last_link = None     # the link in the latest email
         self.tokens = {}          # access token -> user id
         self.refresh_tokens = {}  # refresh token -> user id
         self.clock = 0
@@ -88,22 +85,6 @@ class FakeSupabase:
         if 'apikey' not in headers:
             return 401, {'message': 'no apikey'}
 
-        if path == '/auth/v1/otp':
-            if body['email'] not in self.users:
-                return 422, {'code': 422, 'error_code': 'otp_disabled', 'msg': 'Signups not allowed for otp'}
-            # The email Supabase sends a new free project: a link, built the way Supabase builds it.
-            token_hash = uuid.uuid4().hex
-            self.links[token_hash] = body['email']
-            self.last_link = f'{SUPABASE_URL}/auth/v1/verify?token={token_hash}&type=magiclink&redirect_to=https%3A%2F%2Fexample.github.io%2F'
-            return 200, {}
-        if path == '/auth/v1/verify':
-            if 'token_hash' in body:  # from a link, which works once
-                email = self.links.pop(body['token_hash'], None) if body.get('type') == 'email' else None
-            else:
-                email = body.get('email') if body.get('token') == CODE else None
-            if not email:
-                return 403, {'msg': 'Token has expired or is invalid'}
-            return 200, self.new_session(self.users[email], email)
         if path == '/auth/v1/token' and query.get('grant_type') == ['password']:
             if body.get('email') not in self.users or body.get('password') != PASSWORD:
                 return 400, {'error_code': 'invalid_credentials', 'msg': 'Invalid login credentials'}
@@ -189,22 +170,9 @@ class Phone:
         self.page.click('#project-connect')
 
     def sign_in(self, password=PASSWORD, email=EMAIL):
-        if self.locator('#use-password').count():
-            self.page.click('#use-password')
         self.page.fill('#sign-in-email', email)
         self.page.fill('#sign-in-password', password)
         self.page.click('#sign-in')
-
-    def request_code(self, email=EMAIL):
-        """Asks for a sign-in email, the fallback for a forgotten password."""
-        if self.locator('#use-email-link').count():
-            self.page.click('#use-email-link')
-        self.page.fill('#sign-in-email', email)
-        self.page.click('#send-code')
-
-    def enter_code(self, code_or_link=CODE):
-        self.page.fill('#sign-in-code', code_or_link)
-        self.page.click('#sign-in-with-link')
 
     def wait_for(self, condition, timeout_s=5):
         """Waits until condition() is true or time runs out; the test then asserts it.
@@ -218,6 +186,18 @@ class Phone:
 
     def screenshot(self, name):
         self.page.screenshot(path=os.path.join(SCREENSHOTS, name + '.png'), full_page=True)
+
+    def stored(self, store, key):
+        """A row as this phone keeps it in IndexedDB."""
+        return self.page.evaluate('''([store, key]) => new Promise((resolve, reject) => {
+          const request = indexedDB.open('logbook');
+          request.onsuccess = () => {
+            const get = request.result.transaction(store).objectStore(store).get(key);
+            get.onsuccess = () => { request.result.close(); resolve(get.result); };
+            get.onerror = () => reject(get.error);
+          };
+          request.onerror = () => reject(request.error);
+        })''', [store, key])
 
 
 def tracker_names(phone):
@@ -252,7 +232,9 @@ def fields(row, expected):
     return {name: row.get(name) for name in expected}
 
 
-# Loads the fixture into the app's IndexedDB, replacing what's there, as if it had been logged on this phone.
+# ---------- phones with known data ----------
+
+# Loads trackers and entries into the app's IndexedDB, replacing what's there, as if logged on this phone.
 LOAD_FIXTURE = '''async (fixture) => {
   const db = await new Promise((resolve, reject) => {
     const request = indexedDB.open('logbook', 1);
@@ -270,6 +252,30 @@ LOAD_FIXTURE = '''async (fixture) => {
   });
   db.close();
 }'''
+
+
+def phone_with(browser, supabase, trackers, entries, timezone='America/New_York'):
+    """A new phone that has just these trackers and entries."""
+    phone = Phone(browser, supabase, timezone=timezone)
+    phone.page.evaluate(LOAD_FIXTURE, {'trackers': trackers, 'entries': entries})
+    phone.open()
+    return phone
+
+
+def make_tracker(name, type_, color='amber', sort_order=10):
+    return {'id': str(uuid.uuid4()), 'name': name, 'type': type_, 'group_name': None, 'color': color,
+            'config': {}, 'sort_order': sort_order, 'archived': False}
+
+
+def make_entry(tracker, kind, occurred_at, note=None):
+    return {'id': str(uuid.uuid4()), 'tracker_id': tracker['id'], 'kind': kind, 'occurred_at': occurred_at,
+            'value': None, 'text': None, 'note': note, 'checkin_id': None, 'deleted': False}
+
+
+def minutes_ago(minutes):
+    """A UTC timestamp, as the app stores them."""
+    when = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)
+    return when.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 
 # ---------- pytest fixtures ----------
@@ -540,22 +546,6 @@ def test_sign_in_refuses_wrong_password(phone1):
     expect(phone1.locator('#sign-in-error')).to_contain_text("don't match a user in this project")
 
 
-def test_sign_in_refuses_unknown_email(phone1):
-    phone1.request_code('stranger@example.com')
-    expect(phone1.locator('#sign-in-error')).to_contain_text("isn't a user in this project")
-
-
-def test_sign_in_refuses_wrong_code(phone1):
-    phone1.request_code()
-    phone1.enter_code('000000')
-    expect(phone1.locator('#sign-in-error')).to_contain_text("didn't work")
-
-
-def test_sign_in_refuses_wrong_link(phone1):
-    phone1.enter_code(f'{SUPABASE_URL}/auth/v1/verify?token=not-a-real-token&type=magiclink')
-    expect(phone1.locator('#sign-in-error')).to_contain_text("didn't work")
-
-
 def test_signing_in_uploads_everything(phone1, supabase, phone1_export):
     phone1.sign_in()
     expect(phone1.locator('#sync-pill')).to_contain_text('Synced')
@@ -572,22 +562,27 @@ def test_changes_from_other_devices_are_pulled(phone1, supabase):
     expect(phone1.locator('#trackers')).to_contain_text('Drowsy')
 
 
-def test_pull_reads_a_cursor_saved_by_an_earlier_build(phone1):
-    # Earlier builds saved just the updated_at; the pull now saves the id of the last row with it.
-    in_meta = '''([key, value]) => new Promise((resolve, reject) => {
-      const request = indexedDB.open('logbook');
-      request.onsuccess = () => {
-        const store = request.result.transaction('meta', 'readwrite').objectStore('meta');
-        const call = value === undefined ? store.get(key) : store.put({ key, value });
-        call.onsuccess = () => { request.result.close(); resolve(value === undefined ? call.result?.value ?? null : null); };
-        call.onerror = () => reject(call.error);
-      };
-      request.onerror = () => reject(request.error);
-    })'''
-    phone1.page.evaluate(in_meta, ['cursor:entries', '2026-10-03T12:00:00+00:00'])
-    phone1.page.click('#sync-now')
-    phone1.wait_for(lambda: isinstance(phone1.page.evaluate(in_meta, ['cursor:entries']), dict))
-    assert set(phone1.page.evaluate(in_meta, ['cursor:entries'])) == {'updatedAt', 'id'}
+WIPED_ENTRY = {'deleted': True, 'value': None, 'text': None, 'note': None}
+
+
+def test_deleting_an_entry_wipes_it_here_and_in_supabase(phone1, supabase):
+    cup = next(row['id'] for row in supabase.rows('entries') if row['note'] == 'second cup')
+    phone1.go_to('Today')
+    phone1.locator('.entry-row', has_text='second cup').click()
+    phone1.locator('.entry-editor .button.danger').click()
+    expect(phone1.locator('#day-log')).not_to_contain_text('second cup')
+    phone1.wait_for(lambda: fields(supabase.tables['entries'][cup], WIPED_ENTRY) == WIPED_ENTRY)
+    assert fields(supabase.tables['entries'][cup], WIPED_ENTRY) == WIPED_ENTRY
+    assert fields(phone1.stored('entries', cup), WIPED_ENTRY) == WIPED_ENTRY
+
+
+def test_backup_leaves_out_deleted_rows(phone1):
+    phone1.go_to('Settings')
+    with phone1.page.expect_download() as download:
+        phone1.page.click('#export-backup')
+    backup = json.load(open(download.value.path()))
+    assert backup['trackers'] and backup['entries']
+    assert not any(row['deleted'] for row in backup['trackers'] + backup['entries'])
 
 
 def test_offline_entries_wait_then_upload(phone1, supabase):
@@ -627,9 +622,8 @@ def test_last_sync_on_an_earlier_day(phone1, supabase):
 def test_outdated_database_stops_sync(phone2, supabase):
     phone2.go_to('Settings')
     phone2.connect()
-    phone2.request_code()
     supabase.schema_version = 0  # the owner hasn't run the latest schema.sql yet
-    phone2.enter_code()
+    phone2.sign_in()
     expect(phone2.locator('#sync-pill')).to_contain_text('Action needed')
     expect(phone2.locator('#sync-panel')).to_contain_text("Your Supabase project needs Logbook's tables")
     expect(phone2.locator('#trackers')).not_to_contain_text('Drowsy')
@@ -640,9 +634,7 @@ def test_setup_sql_can_be_copied_into_the_sql_editor(phone2):
     phone2.context.grant_permissions(['clipboard-read', 'clipboard-write'])
     phone2.page.click('#schema-copy')
     expect(phone2.locator('.toast')).to_contain_text('Setup SQL copied')
-    sql = phone2.page.evaluate('navigator.clipboard.readText()')
-    assert 'create table if not exists public.trackers' in sql
-    assert "$$ select 'Europe/Berlin' $$" in sql  # the views use this phone's time zone
+    assert 'create table if not exists public.trackers' in phone2.page.evaluate('navigator.clipboard.readText()')
 
 
 def test_fresh_phone_takes_the_accounts_trackers(phone2, supabase):
@@ -697,8 +689,7 @@ def test_names_are_shown_as_typed_on_today(phone3):
 def test_joining_asks_before_replacing_this_phones_data(phone3, supabase):
     phone3.go_to('Settings')
     phone3.connect()
-    phone3.request_code()
-    phone3.enter_code(supabase.last_link)  # pasted from the email instead of a code
+    phone3.sign_in()
     expect(phone3.locator('#sync-panel')).to_contain_text('Your account already has data')
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS  # nothing uploaded yet
 
@@ -710,6 +701,7 @@ def test_choosing_the_account_replaces_this_phones_data(phone3, supabase):
 
 
 def test_delete_a_tracker_everywhere(phone1, phone3, supabase):
+    drowsy = next(row['id'] for row in supabase.rows('trackers') if row['name'] == 'Drowsy')
     phone3.locator('.tracker-list li', has_text='Drowsy').locator('[data-edit-tracker]').click()
     phone3.page.click('#editor-delete')
     expect(phone3.locator('.tracker-editor .notice')).to_contain_text('Delete Drowsy for good?')
@@ -717,9 +709,10 @@ def test_delete_a_tracker_everywhere(phone1, phone3, supabase):
     phone3.page.click('#editor-delete-confirm')
     expect(phone3.locator('#trackers')).not_to_contain_text('Drowsy')
 
-    drowsy = next(row['id'] for row in supabase.rows('trackers') if row['name'] == 'Drowsy')
+    wiped = {'deleted': True, 'name': '', 'group_name': None, 'config': {}}
     its_entries = lambda: [row for row in supabase.rows('entries') if row['tracker_id'] == drowsy]
-    deleted_everywhere = lambda: supabase.tables['trackers'][drowsy]['deleted'] and all(row['deleted'] for row in its_entries())
+    deleted_everywhere = lambda: (fields(supabase.tables['trackers'][drowsy], wiped) == wiped
+                                  and all(fields(row, WIPED_ENTRY) == WIPED_ENTRY for row in its_entries()))
     phone3.wait_for(deleted_everywhere)
     assert its_entries() and deleted_everywhere()
 
@@ -729,13 +722,18 @@ def test_delete_a_tracker_everywhere(phone1, phone3, supabase):
     expect(phone1.locator('#trackers')).not_to_contain_text('Drowsy')
 
 
-def test_delete_an_archived_tracker_takes_a_second_tap(phone3):
+def test_delete_an_archived_tracker_takes_a_second_tap(phone3, supabase):
+    meal = next(row['id'] for row in supabase.rows('trackers') if row['name'] == 'Meal')
     phone3.page.evaluate("document.querySelector('#archived-trackers').open = true")
     delete = phone3.locator('#archived-trackers li', has_text='Meal').locator('[data-delete-tracker]')
     delete.click()
     expect(delete).to_have_text('Delete for good?')
     delete.click()
     expect(phone3.locator('#archived-trackers')).to_have_count(0)  # Meal was the only archived tracker
+    # Uploaded before the next test looks at what's in Supabase.
+    meal_deleted = lambda: supabase.tables['trackers'][meal]['deleted']
+    phone3.wait_for(meal_deleted)
+    assert meal_deleted()
 
 
 def live_tracker_names(supabase):
@@ -826,21 +824,13 @@ def test_an_account_with_only_deleted_trackers_counts_as_empty(browser, supabase
 
 
 def test_day_timeline_shows_gaps_and_overnight_episodes(browser, supabase):
-    tired = {'id': '00000000-0000-4000-8000-0000000000d1', 'name': 'Tired', 'type': 'episode', 'group_name': 'Symptoms',
-             'color': 'indigo', 'config': {}, 'sort_order': 10, 'archived': False}
-    coffee = {**tired, 'id': '00000000-0000-4000-8000-0000000000d2', 'name': 'Coffee', 'type': 'moment', 'color': 'amber'}
-    def entry(n, tracker, kind, utc):
-        return {'id': f'00000000-0000-4000-9000-0000000000d{n}', 'tracker_id': tracker['id'], 'kind': kind, 'occurred_at': utc,
-                'value': None, 'text': None, 'note': None, 'checkin_id': None, 'deleted': False}
-    entries = [  # New York times, November 2025 (UTC-5)
-        entry(1, tired, 'start', '2025-11-11T03:00:00.000Z'),   # Nov 10, 22:00
-        entry(2, tired, 'end', '2025-11-11T12:00:00.000Z'),     # Nov 11, 07:00
-        entry(3, coffee, 'moment', '2025-11-11T13:00:00.000Z'),  # Nov 11, 08:00
-        entry(4, coffee, 'moment', '2025-11-11T16:30:00.000Z'),  # Nov 11, 11:30
-    ]
-    phone = Phone(browser, supabase, timezone='America/New_York')
-    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [tired, coffee], 'entries': entries})
-    phone.open()
+    tired, coffee = make_tracker('Tired', 'episode', 'indigo'), make_tracker('Coffee', 'moment')
+    phone = phone_with(browser, supabase, [tired, coffee], [  # New York times, November 2025 (UTC-5)
+        make_entry(tired, 'start', '2025-11-11T03:00:00.000Z'),    # Nov 10, 22:00
+        make_entry(tired, 'end', '2025-11-11T12:00:00.000Z'),      # Nov 11, 07:00
+        make_entry(coffee, 'moment', '2025-11-11T13:00:00.000Z'),  # Nov 11, 08:00
+        make_entry(coffee, 'moment', '2025-11-11T16:30:00.000Z'),  # Nov 11, 11:30
+    ])
     phone.page.click('#previous-day')
     expect(phone.locator('.day-name')).to_contain_text('Tue, Nov 11')
 
@@ -861,26 +851,18 @@ def test_day_timeline_shows_gaps_and_overnight_episodes(browser, supabase):
 
 
 def test_day_timeline_never_draws_two_bars_in_one_lane(browser, supabase):
-    def tracker(n, name, type_, color):
-        return {'id': f'00000000-0000-4000-8000-0000000000e{n}', 'name': name, 'type': type_, 'group_name': None,
-                'color': color, 'config': {}, 'sort_order': n * 10, 'archived': False}
-    headache, tired, anxious, coffee = (tracker(1, 'Headache', 'episode', 'amber'), tracker(2, 'Tired', 'episode', 'indigo'),
-                                        tracker(3, 'Anxious', 'episode', 'teal'), tracker(4, 'Coffee', 'moment', 'amber'))
-    def entry(n, of, kind, utc):
-        return {'id': f'00000000-0000-4000-9000-0000000000e{n}', 'tracker_id': of['id'], 'kind': kind, 'occurred_at': utc,
-                'value': None, 'text': None, 'note': None, 'checkin_id': None, 'deleted': False}
-    entries = [  # Nov 12, 2025, New York: Anxious starts and ends in the row where Headache's bar stops
-        entry(1, headache, 'start', '2025-11-12T14:04:00.000Z'),
-        entry(2, tired, 'start', '2025-11-12T14:23:00.000Z'),
-        entry(3, tired, 'end', '2025-11-12T14:24:00.000Z'),
-        entry(4, coffee, 'moment', '2025-11-12T14:24:30.000Z'),
-        entry(5, anxious, 'start', '2025-11-12T14:25:10.000Z'),
-        entry(6, anxious, 'end', '2025-11-12T14:25:20.000Z'),
-        entry(7, headache, 'end', '2025-11-12T14:25:30.000Z'),
-    ]
-    phone = Phone(browser, supabase, timezone='America/New_York')
-    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [headache, tired, anxious, coffee], 'entries': entries})
-    phone.open()
+    headache, tired, anxious = make_tracker('Headache', 'episode'), make_tracker('Tired', 'episode'), make_tracker('Anxious', 'episode')
+    coffee = make_tracker('Coffee', 'moment')
+    phone = phone_with(browser, supabase, [headache, tired, anxious, coffee], [
+        # Nov 12, 2025, New York: Anxious starts and ends in the row where Headache's bar stops
+        make_entry(headache, 'start', '2025-11-12T14:04:00.000Z'),
+        make_entry(tired, 'start', '2025-11-12T14:23:00.000Z'),
+        make_entry(tired, 'end', '2025-11-12T14:24:00.000Z'),
+        make_entry(coffee, 'moment', '2025-11-12T14:24:30.000Z'),
+        make_entry(anxious, 'start', '2025-11-12T14:25:10.000Z'),
+        make_entry(anxious, 'end', '2025-11-12T14:25:20.000Z'),
+        make_entry(headache, 'end', '2025-11-12T14:25:30.000Z'),
+    ])
     phone.page.click('#previous-day')
     expect(phone.locator('.day-name')).to_contain_text('Wed, Nov 12')
     expect(phone.locator('#day-log')).to_have_attribute('data-lanes', '2')
@@ -890,18 +872,12 @@ def test_day_timeline_never_draws_two_bars_in_one_lane(browser, supabase):
 
 def test_ended_episode_stops_below_now(browser, supabase):
     # Ended ten minutes after the last thing logged: its bar must end in a ring, not run up to Now like a running one.
-    headache = {'id': '00000000-0000-4000-8000-0000000000f1', 'name': 'Headache', 'type': 'episode', 'group_name': None,
-                'color': 'amber', 'config': {}, 'sort_order': 10, 'archived': False}
-    coffee = {**headache, 'id': '00000000-0000-4000-8000-0000000000f2', 'name': 'Coffee', 'type': 'moment'}
-    phone = Phone(browser, supabase)
-    now = phone.page.evaluate('Date.now()')
-    def entry(n, of, kind, minutes_ago):
-        utc = phone.page.evaluate(f'new Date({now} - {minutes_ago} * 60000).toISOString()')
-        return {'id': f'00000000-0000-4000-9000-0000000000f{n}', 'tracker_id': of['id'], 'kind': kind, 'occurred_at': utc,
-                'value': None, 'text': None, 'note': None, 'checkin_id': None, 'deleted': False}
-    entries = [entry(1, headache, 'start', 30), entry(2, coffee, 'moment', 20), entry(3, headache, 'end', 10)]
-    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [headache, coffee], 'entries': entries})
-    phone.open()
+    headache, coffee = make_tracker('Headache', 'episode'), make_tracker('Coffee', 'moment')
+    phone = phone_with(browser, supabase, [headache, coffee], [
+        make_entry(headache, 'start', minutes_ago(30)),
+        make_entry(coffee, 'moment', minutes_ago(20)),
+        make_entry(headache, 'end', minutes_ago(10)),
+    ], timezone=None)
     rows = phone.locator('#day-log > li')
     expect(rows.first).to_have_class('day-row day-now')
     expect(phone.locator('#day-log .lane-bar.is-now')).to_have_count(0)
@@ -935,23 +911,16 @@ def test_moving_an_episode_earlier_keeps_it_whole(browser, supabase):
 
 
 def test_editing_episodes_keeps_them_whole(browser, supabase):
-    def tracker(n, name):
-        return {'id': f'00000000-0000-4000-8000-0000000000b{n}', 'name': name, 'type': 'episode', 'group_name': None,
-                'color': 'amber', 'config': {}, 'sort_order': n * 10, 'archived': False}
-    headache, pain = tracker(1, 'Headache'), tracker(2, 'Pain')
-    def entry(n, of, kind, utc, note=None):
-        return {'id': f'00000000-0000-4000-9000-0000000000b{n}', 'tracker_id': of['id'], 'kind': kind, 'occurred_at': utc,
-                'value': None, 'text': None, 'note': note, 'checkin_id': None, 'deleted': False}
-    entries = [  # Nov 13, 2025, New York (UTC-5)
-        entry(1, headache, 'end', '2025-11-13T13:00:00.000Z'),    # 8:00, with no start before it
-        entry(2, headache, 'start', '2025-11-13T14:00:00.000Z'),  # 9:00, cut short by the next start
-        entry(3, headache, 'start', '2025-11-13T15:00:00.000Z'),  # 10:00, still going
-        entry(4, pain, 'start', '2025-11-13T19:00:10.000Z'),      # 14:00:10
-        entry(5, pain, 'end', '2025-11-13T19:00:50.000Z', note='took ibuprofen'),  # 14:00:50, in the same minute
-    ]
-    phone = Phone(browser, supabase, timezone='America/New_York')
-    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [headache, pain], 'entries': entries})
-    phone.open()
+    headache, pain = make_tracker('Headache', 'episode'), make_tracker('Pain', 'episode')
+    phone = phone_with(browser, supabase, [headache, pain], [  # Nov 13, 2025, New York (UTC-5)
+        make_entry(headache, 'end', '2025-11-13T13:00:00.000Z'),    # 8:00, with no start before it
+        make_entry(headache, 'start', '2025-11-13T14:00:00.000Z'),  # 9:00, cut short by the next start
+        make_entry(headache, 'start', '2025-11-13T15:00:00.000Z'),  # 10:00, still going
+        make_entry(pain, 'start', '2025-11-13T17:00:00.000Z'),      # 12:00
+        make_entry(pain, 'end', '2025-11-13T18:00:00.000Z'),        # 13:00
+        make_entry(pain, 'start', '2025-11-13T19:00:10.000Z'),      # 14:00:10
+        make_entry(pain, 'end', '2025-11-13T19:00:50.000Z', note='took ibuprofen'),  # 14:00:50, in the same minute
+    ])
     phone.page.click('#previous-day')
     expect(phone.locator('.day-name')).to_contain_text('Thu, Nov 13')
     log, toast = phone.locator('#day-log'), phone.locator('.toast')
@@ -966,11 +935,12 @@ def test_editing_episodes_keeps_them_whole(browser, supabase):
     phone.locator('.entry-row', has_text='Headache ended').click()
     phone.locator('.entry-editor input[type=time]').fill('09:30')
     phone.locator('[data-save-entry]').click()
-    expect(toast).to_contain_text('That would end the Headache that started at 9:00 AM.')
+    expect(toast).to_contain_text('That would overlap another Headache.')
     expect(log).to_contain_text('Headache · until 10:00 AM')
 
     # Pain began and ended within a minute, and its note, kept on its end, can still be changed.
-    phone.locator('.entry-row.is-episode', has_text='Pain').click()
+    pain_at_two = phone.locator('.entry-row.is-episode', has_text='until 2:00 PM')
+    pain_at_two.click()
     note = phone.locator('.entry-editor input[type=text]')
     expect(note).to_have_value('took ibuprofen')
     note.fill('better after lunch')
@@ -979,28 +949,30 @@ def test_editing_episodes_keeps_them_whole(browser, supabase):
     expect(log).to_contain_text('better after lunch')
     expect(log).not_to_contain_text('took ibuprofen')
 
+    # Nor can it be moved, start and end together, into the middle of the 12:00 Pain.
+    pain_at_two.click()
+    phone.locator('.entry-editor input[type=time]').nth(0).fill('12:15')
+    phone.locator('.entry-editor input[type=time]').nth(1).fill('12:30')
+    phone.locator('[data-save-entry]').click()
+    expect(toast).to_contain_text('That would overlap another Pain.')
+    expect(log).to_contain_text('Pain · until 2:00 PM')
+
 
 def test_day_when_the_clocks_go_back_has_25_hours(browser, supabase):
-    coffee = {'id': '00000000-0000-4000-8000-0000000000c1', 'name': 'Coffee', 'type': 'moment', 'group_name': 'Moments',
-              'color': 'amber', 'config': {}, 'sort_order': 10, 'archived': False}
-    late = {'id': '00000000-0000-4000-9000-0000000000c1', 'tracker_id': coffee['id'], 'kind': 'moment',
-            'occurred_at': '2025-11-03T04:30:00.000Z',  # Nov 2, 23:30 in New York, after the clocks went back
-            'value': None, 'text': None, 'note': None, 'checkin_id': None, 'deleted': False}
-    phone = Phone(browser, supabase, timezone='America/New_York')
-    phone.page.evaluate(LOAD_FIXTURE, {'trackers': [coffee], 'entries': [late]})
-    phone.open()
+    coffee = make_tracker('Coffee', 'moment')
+    phone = phone_with(browser, supabase, [coffee], [
+        make_entry(coffee, 'moment', '2025-11-03T04:30:00.000Z'),  # Nov 2, 23:30 in New York, after the clocks went back
+    ])
     phone.page.click('#previous-day')
     expect(phone.locator('.day-name')).to_contain_text('Sun, Nov 2')
     expect(phone.locator('#day-log')).to_contain_text('Coffee')
 
 
-# ---------- the analysis export, from known data (schema_test.py checks the same figures in SQL) ----------
+# ---------- the analysis export, from known data ----------
 
 @pytest.fixture(scope='module')
 def fixture_export(browser, supabase):
-    phone = Phone(browser, supabase, timezone=TIMEZONE)
-    phone.page.evaluate(LOAD_FIXTURE, FIXTURE)
-    phone.open()
+    phone = phone_with(browser, supabase, FIXTURE['trackers'], FIXTURE['entries'], timezone=TIMEZONE)
     phone.screenshot('today-fixture')
     return export_for_analysis(phone).tables
 

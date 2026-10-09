@@ -1,4 +1,4 @@
--- Tracker app: database setup
+-- Logbook: database setup
 -- Paste this whole file into Supabase → SQL Editor → New query, then click Run.
 -- Safe to run more than once. When the app is updated with database changes, run the whole file again:
 -- the app checks logbook_schema_version() (at the end) and says so when this is needed.
@@ -43,6 +43,7 @@ create table if not exists public.entries (
 
 -- Version 2: deleting a tracker (a flag, like entries have, so the deletion syncs).
 alter table public.trackers add column if not exists deleted boolean not null default false;
+-- Version 3: a deleted row is wiped (see "A deletion is final" below).
 
 -- The allowed tracker types and entry kinds. Keep in step with TRACKER_TYPES and ENTRY_KINDS in src/lib/model.ts.
 alter table public.trackers drop constraint if exists trackers_type_check;
@@ -51,6 +52,13 @@ alter table public.trackers add constraint trackers_type_check
 alter table public.entries drop constraint if exists entries_kind_check;
 alter table public.entries add constraint entries_kind_check
   check (kind in ('start', 'end', 'level', 'moment', 'answer'));
+
+-- Earlier versions had analysis views; the app's "Export for analysis" replaces them.
+drop view if exists public.daily_summary;
+drop view if exists public.entries_readable;
+drop view if exists public.episodes_readable;
+drop function if exists public.logbook_entry_text(text, text, text, text, numeric, text);
+drop function if exists public.logbook_timezone();
 
 -- ---------- Indexes ----------
 
@@ -75,23 +83,48 @@ drop trigger if exists entries_touch on public.entries;
 create trigger entries_touch before insert or update on public.entries
   for each row execute function public.touch_updated_at();
 
--- ---------- A deletion is final ----------
--- So an upload from a phone that hadn't heard of it yet (a tracker reordered offline, say) can't bring the row back.
+-- ---------- A deletion is final, and keeps nothing ----------
+-- A deleted row stays, marked deleted, so the deletion reaches every phone. It stays deleted even when a phone
+-- that hadn't heard of it yet uploads its own copy (a tracker reordered offline, say), and whatever it held is
+-- wiped. The app wipes the same fields: deletedTracker() and deletedEntry() in src/lib/model.ts.
 
-create or replace function public.keep_deleted()
+create or replace function public.final_tracker_deletion()
 returns trigger language plpgsql as $$
 begin
-  new.deleted := new.deleted or old.deleted;
+  if tg_op = 'UPDATE' then
+    new.deleted := new.deleted or old.deleted;
+  end if;
+  if new.deleted then
+    new.name := '';
+    new.group_name := null;
+    new.config := '{}';
+  end if;
+  return new;
+end $$;
+
+create or replace function public.final_entry_deletion()
+returns trigger language plpgsql as $$
+begin
+  if tg_op = 'UPDATE' then
+    new.deleted := new.deleted or old.deleted;
+  end if;
+  if new.deleted then
+    new.value := null;
+    new.text := null;
+    new.note := null;
+  end if;
   return new;
 end $$;
 
 drop trigger if exists trackers_keep_deleted on public.trackers;
-create trigger trackers_keep_deleted before update on public.trackers
-  for each row execute function public.keep_deleted();
+create trigger trackers_keep_deleted before insert or update on public.trackers
+  for each row execute function public.final_tracker_deletion();
 
 drop trigger if exists entries_keep_deleted on public.entries;
-create trigger entries_keep_deleted before update on public.entries
-  for each row execute function public.keep_deleted();
+create trigger entries_keep_deleted before insert or update on public.entries
+  for each row execute function public.final_entry_deletion();
+
+drop function if exists public.keep_deleted(); -- what earlier versions' triggers used
 
 -- ---------- Security: only the signed-in owner can see or change a row ----------
 
@@ -116,232 +149,12 @@ revoke all on public.entries  from anon;
 grant select, insert, update, delete on public.trackers to authenticated;
 grant select, insert, update, delete on public.entries  to authenticated;
 
--- ---------- Analysis views ----------
--- The same tables the app's "Export for analysis" produces, for querying here in the SQL Editor:
---   entries_readable   one row per entry, with readable columns and the episode it belongs to
---   episodes_readable  one row per start/stop episode: start, end, duration, status, peak severity
---   daily_summary      one row per day per tracker: averages, totals, episode minutes, counts
--- Dates and times are local to this time zone. The app's "Copy setup SQL" fills in the phone's own; to change it
--- by hand, edit it here and run the file again (names: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
-
-create or replace function public.logbook_timezone()
-returns text language sql immutable as $$ select 'America/New_York' $$;
-
--- Dropped and recreated so their columns can change between versions.
-drop view if exists public.daily_summary;
-drop view if exists public.entries_readable;
-drop view if exists public.episodes_readable;
-
--- One line describing an entry, e.g. 'Headache started', 'Mood: Good', 'Water: 3 glasses'.
--- Matches entryText() in src/lib/model.ts.
-create or replace function public.logbook_entry_text(
-  kind text, tracker text, tracker_type text, unit text, entry_value numeric, entry_text text)
-returns text language sql immutable as $$
-  select case kind
-    when 'start'  then tracker || ' started'
-    when 'end'    then tracker || ' ended'
-    when 'moment' then tracker
-    when 'answer' then case when tracker_type = 'number'
-                         then tracker || ': ' || coalesce(entry_value::text, '') || coalesce(' ' || nullif(unit, ''), '')
-                         else tracker || ': ' || coalesce(nullif(entry_text, ''), entry_value::text, '') end
-    else tracker || ': ' || coalesce(nullif(entry_text, ''), entry_value::text, '')
-  end
-$$;
-
--- An episode runs from a start to the next start or end of the same tracker:
--- status 'ended' (closed by an end), 'restarted' (closed by another start), or 'ongoing' (still running).
--- "timeline" lists everything logged while it ran, e.g. '10:00 started · 10:30 Moderate · 11:30 Coffee · 12:00 ended'.
-create view public.episodes_readable
-with (security_invoker = true) as
-with events as (
-  select e.id, e.tracker_id, e.occurred_at, e.kind, e.note,
-         lead(e.kind)        over w as next_kind,
-         lead(e.occurred_at) over w as next_at,
-         lead(e.id)          over w as next_id,
-         lead(e.note)        over w as next_note
-  from public.entries e
-  where not e.deleted and e.kind in ('start', 'end')
-  window w as (partition by e.tracker_id order by e.occurred_at, e.id)
-),
-spans as (
-  select id as episode_id,
-         tracker_id,
-         occurred_at as start_utc,
-         coalesce(next_at, now()) as end_or_now,
-         case next_kind when 'end' then 'ended' when 'start' then 'restarted' else 'ongoing' end as status,
-         case when next_kind = 'end' then next_id end as end_entry_id,
-         note as start_note,
-         case when next_kind = 'end' then next_note end as end_note
-  from events
-  where kind = 'start'
-)
-select
-  s.episode_id,
-  t.name as tracker,
-  date_trunc('second', s.start_utc at time zone public.logbook_timezone()) as start,
-  case when s.status <> 'ongoing' then date_trunc('second', s.end_or_now at time zone public.logbook_timezone()) end as "end",
-  round(extract(epoch from s.end_or_now - s.start_utc) / 60, 1) as duration_min,  -- so far, if ongoing
-  s.status,
-  lv.max_level,
-  lv.max_level_label,
-  tl.timeline,
-  nullif(concat_ws(' | ', s.start_note, s.end_note, lv.notes), '') as notes,
-  s.tracker_id,
-  t.group_name as "group",
-  (s.start_utc at time zone public.logbook_timezone())::date as start_date,
-  to_char(s.start_utc at time zone public.logbook_timezone(), 'HH24:MI') as start_time,
-  case when s.status <> 'ongoing' then (s.end_or_now at time zone public.logbook_timezone())::date end as end_date,
-  case when s.status <> 'ongoing' then to_char(s.end_or_now at time zone public.logbook_timezone(), 'HH24:MI') end as end_time,
-  s.start_utc,
-  case when s.status <> 'ongoing' then s.end_or_now end as end_utc,
-  lv.levels_logged,
-  s.end_entry_id
-from spans s
-join public.trackers t on t.id = s.tracker_id
-cross join lateral (
-  -- Severity levels logged while the episode was running.
-  select max(l.value) as max_level,
-         (array_agg(l.text order by l.value desc, l.occurred_at))[1] as max_level_label,
-         count(*)::integer as levels_logged,
-         string_agg(l.note, ' | ' order by l.occurred_at) as notes
-  from public.entries l
-  where l.tracker_id = s.tracker_id and l.kind = 'level' and not l.deleted
-    and l.occurred_at between s.start_utc and s.end_or_now
-) lv
-cross join lateral (
-  -- Everything logged while it ran (at most 100 items). Times on a later day than the start get the date.
-  select string_agg(item, ' · ' order by n) filter (where n <= 100)
-         || case when count(*) > 100 then ' · … and ' || (count(*) - 100) || ' more' else '' end as timeline
-  from (
-    select row_number() over (order by x.occurred_at, xt.sort_order, x.id) as n,
-           case when (x.occurred_at at time zone public.logbook_timezone())::date
-                     <> (s.start_utc at time zone public.logbook_timezone())::date
-                then to_char(x.occurred_at at time zone public.logbook_timezone(), 'MM-DD ') else '' end
-           || to_char(x.occurred_at at time zone public.logbook_timezone(), 'HH24:MI') || ' '
-           || case
-                when x.id = s.episode_id then 'started'
-                when x.id = s.end_entry_id then 'ended'
-                when x.tracker_id = s.tracker_id and x.kind = 'start' then 'restarted'
-                when x.tracker_id = s.tracker_id and x.kind = 'level' then coalesce(nullif(x.text, ''), x.value::text, '')
-                else public.logbook_entry_text(x.kind, xt.name, xt.type, xt.config->>'unit', x.value, x.text)
-              end as item
-    from public.entries x
-    join public.trackers xt on xt.id = x.tracker_id
-    where not x.deleted and not xt.deleted and x.occurred_at between s.start_utc and s.end_or_now
-  ) items
-) tl
-where not t.deleted;
-
-create view public.entries_readable
-with (security_invoker = true) as
-with episodes as (
-  select e.episode_id, e.tracker_id, e.tracker, t.sort_order as tracker_sort,
-         e.start_utc, coalesce(e.end_utc, now()) as end_or_now, e.end_entry_id
-  from public.episodes_readable e
-  join public.trackers t on t.id = e.tracker_id
-)
-select
-  e.id as entry_id,
-  date_trunc('second', e.occurred_at at time zone public.logbook_timezone()) as datetime,
-  (e.occurred_at at time zone public.logbook_timezone())::date as date,
-  to_char(e.occurred_at at time zone public.logbook_timezone(), 'HH24:MI') as time,
-  to_char(e.occurred_at at time zone public.logbook_timezone(), 'Dy') as weekday,
-  e.occurred_at as timestamp_utc,
-  e.tracker_id,
-  t.name as tracker,
-  t.type,
-  t.group_name as "group",
-  e.kind as event,
-  e.value,                                                                        -- rating level, number, or severity
-  case when e.kind = 'answer' and t.type = 'text' then null else e.text end as label,  -- level label or chosen option
-  case when e.kind = 'answer' and t.type = 'text' then e.text end as text,             -- free text
-  e.note,
-  e.checkin_id,
-  coalesce(started.episode_id, ended.episode_id, during_own.episode_id) as episode_id,
-  running.during,               -- other trackers' episodes running at the time
-  running.during_episode_ids
-from public.entries e
-join public.trackers t on t.id = e.tracker_id
-left join episodes started on e.kind = 'start' and started.episode_id = e.id
-left join episodes ended   on e.kind = 'end' and ended.end_entry_id = e.id
-left join lateral (
-  select x.episode_id from episodes x
-  where e.kind = 'level' and x.tracker_id = e.tracker_id and e.occurred_at between x.start_utc and x.end_or_now
-  order by x.start_utc
-  limit 1
-) during_own on true
-left join lateral (
-  select string_agg(x.tracker, '; ' order by x.tracker_sort, x.start_utc) as during,
-         string_agg(x.episode_id::text, '; ' order by x.tracker_sort, x.start_utc) as during_episode_ids
-  from episodes x
-  where x.tracker_id <> e.tracker_id and e.occurred_at between x.start_utc and x.end_or_now
-) running on true
-where not e.deleted and not t.deleted;
-
--- One row per day and tracker that has anything that day. Episode minutes are clipped at local midnight,
--- so an episode across midnight counts toward both days.
-create view public.daily_summary
-with (security_invoker = true) as
-with live as (
-  select e.*, (e.occurred_at at time zone public.logbook_timezone())::date as local_date
-  from public.entries e
-  where not e.deleted
-),
-episode_days as (
-  select ep.tracker_id,
-         d::date as local_date,
-         extract(epoch from
-           least(ep.end_or_now, (d + interval '1 day') at time zone public.logbook_timezone())
-           - greatest(ep.start_utc, d at time zone public.logbook_timezone())) as seconds
-  from (select tracker_id, start_utc, coalesce(end_utc, now()) as end_or_now from public.episodes_readable) ep
-  cross join lateral generate_series(
-    (ep.start_utc  at time zone public.logbook_timezone())::date::timestamp,
-    (ep.end_or_now at time zone public.logbook_timezone())::date::timestamp,
-    interval '1 day') as d
-),
-facts as (
-  select local_date, tracker_id, 'answer' as fact, value, text, occurred_at, null::numeric as seconds from live where kind = 'answer'
-  union all
-  select local_date, tracker_id, 'moment', null, null, occurred_at, null from live where kind = 'moment'
-  union all
-  select local_date, tracker_id, 'level', value, null, occurred_at, null from live where kind = 'level'
-  union all
-  select start_date, tracker_id, 'start', null, null, start_utc, null from public.episodes_readable
-  union all
-  select local_date, tracker_id, 'running', null, null, null, seconds from episode_days
-)
-select
-  f.local_date as date,
-  to_char(f.local_date, 'Dy') as weekday,
-  f.tracker_id,
-  t.name as tracker,
-  t.type,
-  t.group_name as "group",
-  count(*) filter (where f.fact = 'answer')::integer             as answers,
-  round(avg(f.value) filter (where f.fact = 'answer'), 2)            as value_avg,
-  sum(f.value) filter (where f.fact = 'answer')                      as value_total,
-  min(f.value) filter (where f.fact = 'answer')                      as value_min,
-  max(f.value) filter (where f.fact = 'answer')                      as value_max,
-  string_agg(f.text, ' | ' order by f.occurred_at)
-    filter (where f.fact = 'answer' and t.type in ('choice', 'text')) as answer_text,
-  count(*) filter (where f.fact = 'start')::integer              as episodes,
-  round(coalesce(sum(f.seconds) filter (where f.fact = 'running'), 0) / 60)::integer as episode_minutes,
-  max(f.value) filter (where f.fact = 'level')                       as max_level,
-  count(*) filter (where f.fact = 'moment')::integer             as moments
-from facts f
-join public.trackers t on t.id = f.tracker_id
-where not t.deleted
-group by f.local_date, f.tracker_id, t.name, t.type, t.group_name;
-
-revoke all on public.entries_readable, public.episodes_readable, public.daily_summary from anon;
-grant select on public.entries_readable, public.episodes_readable, public.daily_summary to authenticated;
-
 -- ---------- Version ----------
 -- Last, so it only goes up once everything above has run. The app compares it with SCHEMA_VERSION in
 -- src/lib/sync.ts before syncing, and asks for this file to be run again if it's older.
 
 create or replace function public.logbook_schema_version()
-returns integer language sql immutable as $$ select 2 $$;
+returns integer language sql immutable as $$ select 3 $$;
 
 revoke all on function public.logbook_schema_version() from public, anon;
 grant execute on function public.logbook_schema_version() to authenticated;

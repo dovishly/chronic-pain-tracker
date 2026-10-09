@@ -40,6 +40,12 @@ export const toDateTimeInputValue = (ms: number) => `${dayKey(ms)}T${clockTime(m
 /** Time of day in the person's own format, e.g. "9:05 AM". */
 export const formatTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
+/** "9:05 AM" if ms is today, otherwise with its day, e.g. "Yesterday 9:05 AM". */
+export function formatDayTime(ms: number): string {
+  const time = formatTime(ms);
+  return dayKey(ms) === dayKey(Date.now()) ? time : `${dayLabel(dayKey(ms))} ${time}`;
+}
+
 /** "45 min" or "2 h 05 min". Negative durations show as 0 min. */
 export function formatDuration(ms: number): string {
   const minutes = Math.max(0, Math.round(ms / MINUTE_MS));
@@ -47,13 +53,19 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(minutes / 60)} h ${pad2(minutes % 60)} min`;
 }
 
-/** "9:05 AM" if ms is today, otherwise e.g. "Yesterday 9:05 AM". */
-export function startedAt(ms: number): string {
-  const time = formatTime(ms);
-  return dayKey(ms) === dayKey(Date.now()) ? time : `${dayLabel(dayKey(ms))} ${time}`;
-}
+/* ---------- collections ---------- */
 
-/* ---------- exhaustive switches ---------- */
+/** Items grouped by key, groups in order of first appearance. */
+export function groupBy<T, K>(items: Iterable<T>, keyOf: (item: T) => K): Map<K, T[]> {
+  const groups = new Map<K, T[]>();
+  for (const item of items) {
+    const key = keyOf(item);
+    const group = groups.get(key);
+    if (group) group.push(item);
+    else groups.set(key, [item]);
+  }
+  return groups;
+}
 
 /**
  * For the default branch of a switch that must handle every case: `default: return unhandled(tracker.type, null);`
@@ -64,11 +76,36 @@ export function unhandled<T>(value: never, fallback: T): T {
   return fallback;
 }
 
+/* ---------- state that React follows ---------- */
+
+/** A value that changes over time. Components follow one with useStore() in hooks.ts. */
+export interface Store<T> {
+  get(): T;
+  set(value: T): void;
+  subscribe(listener: () => void): () => void;
+}
+
+export function createStore<T>(value: T): Store<T> {
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set(next) {
+      value = next;
+      listeners.forEach(listener => listener());
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
 /* ---------- ids ---------- */
 
 export function uuid(): string {
+  // randomUUID only exists on https pages, so a copy of the app served over http (npm run dev on the home network)
+  // builds a random version-4 UUID itself.
   if (crypto.randomUUID) return crypto.randomUUID();
-  // Fallback for older browsers: a random version-4 UUID.
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
   bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
@@ -78,32 +115,36 @@ export function uuid(): string {
 
 /* ---------- preferences ---------- */
 
-/** Small settings kept as JSON in localStorage under "logbook.<name>". */
+/** Small settings kept as JSON in localStorage under "logbook.<name>". Storage can be unavailable (private browsing). */
 export const prefs = {
   /** The localStorage key for a setting. */
   key: (name: string) => 'logbook.' + name,
-  get<T>(name: string, fallback: T | null = null): T | null {
+
+  get<T>(name: string): T | null {
     try {
       const stored = localStorage.getItem(prefs.key(name));
-      return stored == null ? fallback : (JSON.parse(stored) as T);
+      return stored == null ? null : (JSON.parse(stored) as T);
     } catch {
-      return fallback;
+      return null;
     }
   },
-  /** Removes every setting, including the supabase-js session. */
-  clearAll(): void {
-    try {
-      for (const key of Object.keys(localStorage)) if (key.startsWith(prefs.key(''))) localStorage.removeItem(key);
-    } catch {
-      // Storage unavailable; nothing to clear.
-    }
-  },
+
+  /** Saves a setting; null removes it. */
   set(name: string, value: unknown): void {
     try {
       if (value == null) localStorage.removeItem(prefs.key(name));
       else localStorage.setItem(prefs.key(name), JSON.stringify(value));
     } catch {
-      // Storage unavailable (e.g. private browsing); the app keeps working without it.
+      // The app keeps working without it.
+    }
+  },
+
+  /** Removes every setting, including the supabase-js session. */
+  clearAll(): void {
+    try {
+      for (const key of Object.keys(localStorage)) if (key.startsWith(prefs.key(''))) localStorage.removeItem(key);
+    } catch {
+      // Nothing to clear.
     }
   },
 };

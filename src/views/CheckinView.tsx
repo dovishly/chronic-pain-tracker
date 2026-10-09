@@ -1,9 +1,9 @@
 import { useEffect, type Dispatch, type SetStateAction } from 'react';
 import { useData } from '../hooks';
 import { toDateTimeInputValue, unhandled } from '../lib/util';
-import { CHECKIN_TYPES, groupTrackers, sortedTrackers, type Tracker } from '../lib/model';
+import { CHECKIN_TYPES, activeTrackers, groupTrackers, type Tracker } from '../lib/model';
 import { saveCheckin, type Answer } from '../lib/actions';
-import { colorStyle } from '../components/style';
+import { colorStyle } from '../components/color';
 
 export interface CheckinDraft {
   answers: Record<string, Answer>; // trackerId -> answer
@@ -20,7 +20,7 @@ interface Props {
 
 export function CheckinView({ draft, onChange, onSaved }: Props) {
   const data = useData();
-  const groups = groupTrackers(sortedTrackers(data, CHECKIN_TYPES));
+  const groups = groupTrackers(activeTrackers(data, ...CHECKIN_TYPES));
 
   // Each visit starts at the current time, unless a time was already chosen for this draft.
   useEffect(() => {

@@ -1,8 +1,8 @@
 """Tests for schema.sql in a throwaway local Postgres, with stand-ins for Supabase's auth schema.
 
 Checks that the file can be run again over existing data, that it allows the same tracker types and
-entry kinds as the app, that row-level security keeps users apart, and that the analysis views give
-the same figures as the app's export (tests/e2e_test.py) for the data in tests/fixtures/analysis.json.
+entry kinds as the app, that deletions are final, and that row-level security keeps users apart.
+The data is the known data in tests/fixtures/analysis.json.
 
 Run:  pip install pytest pgserver "psycopg[binary]"
       python -m pytest tests/schema_test.py
@@ -14,11 +14,7 @@ import pgserver
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
-from analysis_data import (
-    FIXTURE, HEADACHE_SEP1, TIRED_OVERNIGHT, HEADACHE_RESTARTED, HEADACHE_SEP2, TIRED_ONGOING,
-    JOURNAL_ANSWER, MOOD_EVENING, HEADACHE_MODERATE, TIRED_OVERNIGHT_END, HEADACHE_SEP2_END,
-    DELETED_COFFEE, COFFEE_DURING_HEADACHE, MOOD_WHILE_TIRED,
-)
+from analysis_data import FIXTURE, JOURNAL_ANSWER, DELETED_COFFEE
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA = open(os.path.join(ROOT, 'schema.sql')).read()
@@ -38,7 +34,6 @@ grant usage on schema public, auth to anon, authenticated;
 
 USER_1 = '11111111-1111-4111-8111-111111111111'  # owns the fixture data
 USER_2 = '22222222-2222-4222-8222-222222222222'  # owns nothing
-ANALYSIS_VIEWS = ['entries_readable', 'episodes_readable', 'daily_summary']
 
 
 # ---------- helpers ----------
@@ -71,11 +66,6 @@ def rows(cur, sql, params=()):
 
 def count(cur, table):
     return rows(cur, f'select count(*) as n from public.{table}')[0]['n']
-
-
-def fields(row, expected):
-    """The row's values for just the fields named in expected, to compare with ==."""
-    return {name: row.get(name) for name in expected}
 
 
 def app_list(name):
@@ -140,140 +130,6 @@ def test_schema_version_matches_the_app(cur):
     assert cur.fetchone()[0] == app_version
 
 
-# ---------- analysis views (the same figures as the export checks in e2e_test.py) ----------
-
-@pytest.fixture(scope='module')
-def episodes(cur):
-    with signed_in_as(cur, USER_1):
-        return rows(cur, 'select * from public.episodes_readable order by start_utc')
-
-
-@pytest.fixture(scope='module')
-def episode(episodes):
-    return {row['episode_id']: row for row in episodes}
-
-
-@pytest.fixture(scope='module')
-def entry(cur):
-    with signed_in_as(cur, USER_1):
-        return {row['entry_id']: row for row in rows(cur, 'select * from public.entries_readable')}
-
-
-@pytest.fixture(scope='module')
-def daily(cur):
-    """daily_summary rows by (date, tracker name)."""
-    with signed_in_as(cur, USER_1):
-        return {(row['date'], row['tracker']): row for row in rows(cur, 'select * from public.daily_summary')}
-
-
-def test_episodes_oldest_first(episodes):
-    assert [row['episode_id'] for row in episodes] == [
-        HEADACHE_SEP1, TIRED_OVERNIGHT, HEADACHE_RESTARTED, HEADACHE_SEP2, TIRED_ONGOING]
-
-
-def test_episode_start_end_levels_and_notes(episode):
-    expected = {
-        'tracker': 'Headache', 'start': '2026-09-01 10:00:00', 'end': '2026-09-01 12:00:00',
-        'start_time': '10:00', 'end_time': '12:00', 'duration_min': 120, 'status': 'ended',
-        'max_level': 3, 'max_level_label': 'Severe', 'levels_logged': 2, 'notes': 'woke with it',
-    }
-    assert fields(episode[HEADACHE_SEP1], expected) == expected
-
-
-def test_episode_timeline_lists_what_happened_in_between(episode):
-    assert episode[HEADACHE_SEP1]['timeline'] == '10:00 started · 10:30 Moderate · 11:00 Severe · 11:30 Coffee · 12:00 ended'
-
-
-def test_episode_across_midnight(episode):
-    expected = {
-        'start_date': '2026-09-01', 'start_time': '22:00', 'end_date': '2026-09-02', 'end_time': '01:30',
-        'duration_min': 210, 'timeline': '22:00 started · 09-02 01:30 ended',
-    }
-    assert fields(episode[TIRED_OVERNIGHT], expected) == expected
-
-
-def test_episode_cut_short_by_a_restart(episode):
-    expected = {'duration_min': 60, 'status': 'restarted', 'timeline': '15:00 started · 16:00 restarted'}
-    assert fields(episode[HEADACHE_RESTARTED], expected) == expected
-    expected = {'duration_min': 30, 'status': 'ended'}
-    assert fields(episode[HEADACHE_SEP2], expected) == expected
-
-
-def test_episode_still_running(episode):
-    expected = {'status': 'ongoing', 'end': None, 'end_date': None, 'end_utc': None,
-                'timeline': '07:00 started · 09:00 Mood: Okay'}
-    assert fields(episode[TIRED_ONGOING], expected) == expected
-
-
-def test_entries_leave_out_deleted(entry):
-    assert DELETED_COFFEE not in entry
-    assert len(entry) == len(FIXTURE['entries']) - 1
-
-
-def test_entry_level_belongs_to_its_episode(entry):
-    expected = {'event': 'level', 'value': 2, 'label': 'Moderate', 'episode_id': HEADACHE_SEP1}
-    assert fields(entry[HEADACHE_MODERATE], expected) == expected
-
-
-def test_entry_end_belongs_to_its_episode(entry):
-    assert entry[TIRED_OVERNIGHT_END]['episode_id'] == TIRED_OVERNIGHT
-    assert entry[HEADACHE_SEP2_END]['episode_id'] == HEADACHE_SEP2
-
-
-def test_entry_in_local_time(entry):
-    expected = {'event': 'answer', 'datetime': '2026-09-01 20:00:00', 'date': '2026-09-01', 'time': '20:00', 'weekday': 'Tue'}
-    assert fields(entry[MOOD_EVENING], expected) == expected
-
-
-def test_entry_during_other_trackers_episodes(entry):
-    expected = {'tracker': 'Coffee', 'during': 'Headache', 'during_episode_ids': HEADACHE_SEP1}
-    assert fields(entry[COFFEE_DURING_HEADACHE], expected) == expected
-    assert entry[MOOD_WHILE_TIRED]['during'] == 'Tired'
-    # An episode's own entries aren't "during" it.
-    assert entry[HEADACHE_MODERATE]['during'] is None
-    assert entry[HEADACHE_SEP2]['during'] is None
-
-
-def test_entry_text_answer_in_text_column(entry):
-    expected = {'text': 'Slept ok', 'label': None}
-    assert fields(entry[JOURNAL_ANSWER], expected) == expected
-
-
-@pytest.mark.parametrize('date, tracker, expected', [
-    ('2026-09-01', 'Mood', {'answers': 2, 'value_avg': 3, 'value_total': 6}),
-    ('2026-09-01', 'Water', {'value_total': 8, 'value_avg': 4}),
-    ('2026-09-01', 'Activities', {'answers': 2, 'answer_text': 'Exercise | Work'}),
-    ('2026-09-01', 'Journal', {'answer_text': 'Slept ok'}),
-    ('2026-09-01', 'Headache', {'episodes': 1, 'episode_minutes': 120, 'max_level': 3}),
-    ('2026-09-01', 'Tired', {'episodes': 1, 'episode_minutes': 120}),
-    ('2026-09-01', 'Coffee', {'moments': 3}),
-    ('2026-09-02', 'Mood', {'value_avg': 5, 'weekday': 'Wed'}),
-    ('2026-09-02', 'Headache', {'episodes': 2, 'episode_minutes': 90, 'max_level': None}),
-    ('2026-09-02', 'Tired', {'episodes': 0, 'episode_minutes': 90}),  # the rest of the episode that began Sep 1
-    ('2026-09-02', 'Snack', {'moments': 1}),
-    ('2026-09-04', 'Tired', {'episodes': 1, 'episode_minutes': 1020}),  # still running: counted to midnight
-    ('2026-09-04', 'Mood', {'value_avg': 3}),
-    ('2026-09-05', 'Tired', {'episode_minutes': 1440}),
-])
-def test_daily_summary(daily, date, tracker, expected):
-    assert fields(daily[(date, tracker)], expected) == expected
-
-
-def test_daily_summary_leaves_out_deleted(daily):
-    assert ('2026-09-02', 'Coffee') not in daily  # the only coffee that day was deleted
-
-
-def test_views_leave_out_deleted_trackers(cur):
-    # Coffee's entries aren't marked deleted, as when a phone logged one before hearing of the deletion.
-    # Rolled back afterwards, since a deletion can't be undone.
-    with signed_in_as(cur, USER_1), cur.connection.transaction(force_rollback=True):
-        cur.execute("update public.trackers set deleted = true where name = 'Coffee'")
-        for view in ANALYSIS_VIEWS:
-            assert 'Coffee' not in {row['tracker'] for row in rows(cur, f'select tracker from public.{view}')}, view
-        timeline = rows(cur, 'select timeline from public.episodes_readable where episode_id = %s', (HEADACHE_SEP1,))
-        assert 'Coffee' not in timeline[0]['timeline']
-
-
 def test_a_deletion_is_final(cur):
     # A phone that hadn't heard of the deletions uploads its own copies, as the app does (an upsert of the whole row).
     upsert_tracker = ('insert into public.trackers (id, name, type, sort_order, deleted) values (%s, %s, %s, %s, false) '
@@ -286,17 +142,38 @@ def test_a_deletion_is_final(cur):
         cur.execute("update public.trackers set deleted = true where name = 'Coffee'")
         cur.execute(upsert_tracker, (coffee['id'], 'Coffee', 'moment', 99))
         cur.execute(upsert_entry, (DELETED_COFFEE, deleted_coffee['tracker_id'], deleted_coffee['occurred_at'], deleted_coffee['kind'], 'stale'))
-        tracker = rows(cur, 'select sort_order, deleted from public.trackers where id = %s', (coffee['id'],))[0]
-        assert tracker == {'sort_order': 99, 'deleted': True}  # the rest of the edit still lands
+        tracker = rows(cur, 'select name, sort_order, deleted from public.trackers where id = %s', (coffee['id'],))[0]
+        assert tracker == {'name': '', 'sort_order': 99, 'deleted': True}  # the reorder lands, the name doesn't
         entry = rows(cur, 'select note, deleted from public.entries where id = %s', (DELETED_COFFEE,))[0]
-        assert entry == {'note': 'stale', 'deleted': True}
+        assert entry == {'note': None, 'deleted': True}
+
+
+def test_a_deletion_wipes_what_the_row_held(cur):
+    mood = next(t for t in FIXTURE['trackers'] if t['name'] == 'Mood')
+    with signed_in_as(cur, USER_1), cur.connection.transaction(force_rollback=True):
+        cur.execute('update public.trackers set deleted = true where id = %s', (mood['id'],))
+        cur.execute('update public.entries set deleted = true where id = %s', (JOURNAL_ANSWER,))
+        tracker = rows(cur, 'select name, group_name, config, type from public.trackers where id = %s', (mood['id'],))[0]
+        assert tracker == {'name': '', 'group_name': None, 'config': {}, 'type': 'rating'}
+        entry = rows(cur, 'select value, text, note, kind from public.entries where id = %s', (JOURNAL_ANSWER,))[0]
+        assert entry == {'value': None, 'text': None, 'note': None, 'kind': 'answer'}
+
+
+def test_a_row_uploaded_already_deleted_keeps_nothing(cur):
+    # As an app version from before deleted rows were wiped would upload one.
+    journal = next(t for t in FIXTURE['trackers'] if t['name'] == 'Journal')
+    with signed_in_as(cur, USER_1), cur.connection.transaction(force_rollback=True):
+        cur.execute('insert into public.entries (id, tracker_id, occurred_at, kind, text, note, deleted) '
+                    "values (gen_random_uuid(), %s, now(), 'answer', 'private', 'also private', true) returning text, note",
+                    (journal['id'],))
+        assert cur.fetchone() == (None, None)
 
 
 # ---------- row-level security ----------
 
 def test_other_user_sees_nothing(cur):
     with signed_in_as(cur, USER_2):
-        for table in ['trackers', 'entries', *ANALYSIS_VIEWS]:
+        for table in ['trackers', 'entries']:
             assert count(cur, table) == 0, table
 
 
@@ -312,7 +189,7 @@ def test_other_user_cant_add_rows_for_someone_else(cur):
                     (USER_1, 'Forged', 'moment'))
 
 
-@pytest.mark.parametrize('table', ['trackers', 'entries', *ANALYSIS_VIEWS])
+@pytest.mark.parametrize('table', ['trackers', 'entries'])
 def test_signed_out_reads_are_refused(cur, table):
     with signed_in_as(cur, None), pytest.raises(psycopg.errors.InsufficientPrivilege):
         cur.execute(f'select 1 from public.{table} limit 1')

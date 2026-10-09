@@ -38,5 +38,4 @@ console.log(`
 In the app (npm run dev), Settings → Sync:
   Project URL                 ${local.API_URL}
   Anon / publishable key      ${local.PUBLISHABLE_KEY || local.ANON_KEY}
-Sign-in emails arrive at      ${local.MAILPIT_URL || local.INBUCKET_URL}
 Database dashboard (Studio)   ${local.STUDIO_URL}`);

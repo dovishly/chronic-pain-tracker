@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useData } from '../../hooks';
 import {
-  COLORS, TYPE_HELP, TYPE_LABELS, defaultConfig, isCustomColor, liveEntries, sortedTrackers, trackerProblem,
+  TYPE_HELP, TYPE_LABELS, allTrackers, defaultConfig, liveEntries, trackerProblem,
   type Tracker, type TrackerConfig, type TrackerType,
 } from '../../lib/model';
 import { archiveTracker, deleteTracker, saveTrackerEdit } from '../../lib/actions';
 import { unhandled } from '../../lib/util';
-import { colorStyle } from '../../components/style';
+import { COLORS, colorStyle, isCustomColor } from '../../components/color';
 
 /** The type-specific settings as the form shows them: everything is text, lists are one item per line. */
 interface ConfigFields {
@@ -33,19 +33,18 @@ function configFields(config: TrackerConfig): ConfigFields {
   };
 }
 
-/** The tracker's config from the form, keeping any settings the form doesn't show. */
-function configFromFields(type: TrackerType, fields: ConfigFields, base: TrackerConfig): TrackerConfig {
+/** The settings a type has, from the form. */
+function configFromFields(type: TrackerType, fields: ConfigFields): TrackerConfig {
   const lines = (text: string) => text.split('\n').map(line => line.trim()).filter(Boolean);
   const numberOrNull = (text: string) => (text === '' ? null : Number(text));
   switch (type) {
     case 'rating':
     case 'episode':
-      return { ...base, levels: lines(fields.levels) };
+      return { levels: lines(fields.levels) };
     case 'choice':
-      return { ...base, options: lines(fields.options), multi: fields.multi };
+      return { options: lines(fields.options), multi: fields.multi };
     case 'number':
       return {
-        ...base,
         unit: fields.unit.trim(),
         step: numberOrNull(fields.step) || 1,
         min: numberOrNull(fields.min),
@@ -53,9 +52,9 @@ function configFromFields(type: TrackerType, fields: ConfigFields, base: Tracker
       };
     case 'moment':
     case 'text':
-      return base;
+      return {};
     default:
-      return unhandled(type, base);
+      return unhandled(type, {});
   }
 }
 
@@ -71,8 +70,6 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
   const [type, setType] = useState(tracker.type);
   const [group, setGroup] = useState(tracker.group_name || '');
   const [color, setColor] = useState(tracker.color);
-  // Switching type starts that type's settings from its defaults.
-  const [baseConfig, setBaseConfig] = useState(tracker.config);
   const [fields, setFields] = useState(() => configFields(tracker.config));
   const [error, setError] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -85,15 +82,13 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
   // A tracker's type is fixed once it has entries, since they were recorded in that type's shape.
   const entryCount = isNew ? 0 : liveEntries(data).filter(e => e.tracker_id === tracker.id).length;
   const typeLocked = entryCount > 0;
-  const existingGroups = [...new Set(sortedTrackers(data, null, { includeArchived: true })
-    .map(t => t.group_name).filter((g): g is string => !!g))];
+  const existingGroups = [...new Set(allTrackers(data).map(t => t.group_name).filter((g): g is string => !!g))];
   const setField: SetField = (key, value) => setFields(f => ({ ...f, [key]: value }));
 
+  // Switching type starts that type's settings from its defaults.
   const changeType = (next: TrackerType) => {
-    const config = defaultConfig(next);
     setType(next);
-    setBaseConfig(config);
-    setFields(configFields(config));
+    setFields(configFields(defaultConfig(next)));
   };
 
   const save = async () => {
@@ -103,7 +98,8 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
       type,
       group_name: group.trim(),
       color,
-      config: configFromFields(type, fields, baseConfig),
+      // Keeps any settings this form doesn't know about (from a newer version of the app).
+      config: { ...(type === tracker.type ? tracker.config : {}), ...configFromFields(type, fields) },
     };
     const problem = trackerProblem(edited);
     if (problem) {

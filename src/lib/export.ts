@@ -1,5 +1,6 @@
 import { dayKey, nowIso } from './util';
 import { dataStore } from './data';
+import { allTrackers, liveEntries } from './model';
 import { buildAnalysisTables, toCsv } from './analysis';
 import { zip } from './zip';
 
@@ -41,14 +42,15 @@ export function exportForAnalysis(): Promise<void> {
   return shareOrDownload({ name: `${folder}.zip`, data: zip(files), type: 'application/zip' });
 }
 
+/** Every tracker and entry in one JSON file. Deleted ones are left out: they hold nothing to keep. */
 export function exportBackup(): Promise<void> {
   const data = dataStore.get();
   const backup = {
     app: 'logbook',
     version: 1,
     exported: nowIso(),
-    trackers: [...data.trackers.values()],
-    entries: [...data.entries.values()],
+    trackers: allTrackers(data),
+    entries: liveEntries(data),
   };
   return shareOrDownload({
     name: `logbook-backup-${today()}.json`,

@@ -1,8 +1,13 @@
-// The export's tables, built from the entries. Times are local; *_utc columns are UTC.
-// The views in schema.sql must give the same episodes and daily figures.
-import { MINUTE_MS, clockTime, dayKey, dayStart, nextDay, pad2, unhandled } from './util';
+// "Export for analysis": five tables built from the entries, which line up by date and id.
+//   daily     one row per calendar day, with a few columns per tracker
+//   checkins  one row per check-in, with a column per question (one per option for choices)
+//   episodes  one row per start/stop episode: its levels, notes, and a timeline of what happened meanwhile
+//   entries   one row per entry, with the episode it belongs to and what else was running
+//   trackers  one row per tracker, with its settings
+// Times are local; *_utc columns are UTC.
+import { MINUTE_MS, clockTime, dayKey, dayStart, groupBy, nextDay, pad2, unhandled } from './util';
 import {
-  allEpisodes, byTime, checkinKey, entryLabel, entryText, entryTime, liveEntries, sortedTrackers,
+  allEpisodes, allTrackers, byTime, checkinKey, entryLabel, entryText, entryTime, liveEntries,
   type Data, type Entry, type EntryKind, type Episode, type Tracker,
 } from './model';
 
@@ -13,6 +18,9 @@ export interface Table {
   columns: string[];
   rows: Cell[][];
 }
+
+/** An episode's timeline lists at most this many items, since one left running for weeks would list everything. */
+const TIMELINE_LIMIT = 100;
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const weekday = (ms: number) => WEEKDAYS[new Date(ms).getDay()];
@@ -25,41 +33,36 @@ const average = (numbers: number[]) => (numbers.length ? round2(total(numbers) /
 const sum = (numbers: number[]) => (numbers.length ? round2(total(numbers)) : null);
 const joinText = (texts: (string | null)[]) => texts.filter(Boolean).join(' | ') || null;
 const valuesOf = (entries: Entry[]) => entries.map(e => e.value).filter((n): n is number => n != null);
+const sortOrder = (data: Data, trackerId: string) => data.trackers.get(trackerId)?.sort_order ?? 0;
+const byId = (a: Entry, b: Entry) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/** Everything the tables are built from. */
+interface Context {
+  data: Data;
+  entries: Entry[];           // live entries, oldest first
+  trackers: Tracker[];        // in display order; archived ones only if they have entries
+  names: Map<string, string>; // tracker id -> its column name (unique)
+  episodes: Episode[];        // oldest first; a running one ends now
+  now: number;
+  levelsByEpisode: Map<string, Entry[]>;  // episode id -> its level entries
+  episodeIdByEntry: Map<string, string>;  // start, end and level entry id -> its episode's id
+  timelineByEpisode: Map<string, string>; // episode id -> everything logged while it ran
+  runningAt: Map<string, Episode[]>;      // entry id -> other trackers' episodes running at its time
+}
 
 export function buildAnalysisTables(data: Data, now = Date.now()): Table[] {
   const entries = liveEntries(data).sort(byTime);
-  const trackersWithEntries = new Set(entries.map(e => e.tracker_id));
-  // Archived trackers are included when they have history.
-  const trackers = sortedTrackers(data, null, { includeArchived: true })
-    .filter(t => !t.archived || trackersWithEntries.has(t.id));
-  const names = columnNames(trackers);
+  const withEntries = new Set(entries.map(e => e.tracker_id));
+  const trackers = allTrackers(data).filter(t => !t.archived || withEntries.has(t.id));
   const episodes = allEpisodes(data).map(e => (e.status === 'ongoing' ? { ...e, end: now } : e));
-  const context: Context = { data, entries, trackers, names, episodes, now, ...linkEpisodes(data, entries, episodes) };
-
-  return [
-    dailyTable(context),
-    checkinsTable(context),
-    episodesTable(context),
-    entriesTable(context),
-    trackersTable(context),
-  ];
+  const context: Context = {
+    data, entries, trackers, episodes, now,
+    names: columnNames(trackers),
+    ...describeEpisodes(data, entries, episodes),
+    runningAt: episodesRunningAt(data, entries, episodes),
+  };
+  return [dailyTable(context), checkinsTable(context), episodesTable(context), entriesTable(context), trackersTable(context)];
 }
-
-interface Context {
-  data: Data;
-  entries: Entry[];          // live entries, oldest first
-  trackers: Tracker[];       // in display order, archived ones only if they have entries
-  names: Map<string, string>; // trackerId -> column name (unique)
-  episodes: Episode[];         // oldest first
-  now: number;
-  levelsByEpisode: Map<string, Entry[]>;   // episodeId -> level entries logged while it ran
-  episodeIdByEntry: Map<string, string>;   // start, end and level entry id -> episodeId
-  timelineByEpisode: Map<string, string>;  // episodeId -> everything logged while it ran, in order
-  runningAt: Map<string, Episode[]>;       // entryId -> other trackers' episodes running at that moment
-}
-
-/** Caps a timeline, which would be huge for an episode left running for weeks. */
-const TIMELINE_LIMIT = 100;
 
 /** Tracker names for column headers; a repeated name gets " (2)", " (3)"… so every column is unique. */
 function columnNames(trackers: Tracker[]): Map<string, string> {
@@ -82,50 +85,45 @@ function choiceOptions(tracker: Tracker, entries: Entry[]): string[] {
   return options;
 }
 
-/** A level on the boundary between two episodes (a restart) belongs to the earlier one. */
-function linkEpisodes(data: Data, entries: Entry[], episodes: Episode[]) {
-  const trackerSort = (trackerId: string) => data.trackers.get(trackerId)?.sort_order ?? 0;
+/* ---------- episodes and what happened during them ---------- */
 
-  const levelsByTracker = new Map<string, Entry[]>(); // oldest first, since entries are
-  for (const e of entries) {
-    if (e.kind !== 'level') continue;
-    if (!levelsByTracker.has(e.tracker_id)) levelsByTracker.set(e.tracker_id, []);
-    levelsByTracker.get(e.tracker_id)!.push(e);
-  }
-
+/** Each episode's levels and timeline, and which episode each start, end and level belongs to. */
+function describeEpisodes(data: Data, entries: Entry[], episodes: Episode[]) {
+  const levelsByTracker = groupBy(entries.filter(e => e.kind === 'level'), e => e.tracker_id);
   // Entries at the same moment (a check-in's answers) are listed in tracker order, then by id.
   const inTimelineOrder = [...entries].sort((a, b) =>
-    entryTime(a) - entryTime(b) || trackerSort(a.tracker_id) - trackerSort(b.tracker_id) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    byTime(a, b) || sortOrder(data, a.tracker_id) - sortOrder(data, b.tracker_id) || byId(a, b));
 
   const levelsByEpisode = new Map<string, Entry[]>();
   const episodeIdByEntry = new Map<string, string>();
   const timelineByEpisode = new Map<string, string>();
   for (const episode of episodes) {
-    episodeIdByEntry.set(episode.id, episode.id);
-    if (episode.endEntryId) episodeIdByEntry.set(episode.endEntryId, episode.id);
     const levels = entriesBetween(levelsByTracker.get(episode.trackerId) ?? [], episode.start, episode.end);
     levelsByEpisode.set(episode.id, levels);
-    for (const level of levels) {
-      if (!episodeIdByEntry.has(level.id)) episodeIdByEntry.set(level.id, episode.id);
-    }
+    episodeIdByEntry.set(episode.id, episode.id);
+    if (episode.endEntryId) episodeIdByEntry.set(episode.endEntryId, episode.id);
+    // A level at the moment one episode restarts into the next belongs to the earlier one.
+    for (const level of levels) if (!episodeIdByEntry.has(level.id)) episodeIdByEntry.set(level.id, episode.id);
     timelineByEpisode.set(episode.id, timeline(data, episode, entriesBetween(inTimelineOrder, episode.start, episode.end)));
   }
+  return { levelsByEpisode, episodeIdByEntry, timelineByEpisode };
+}
 
-  // Sweep through entries in time order, keeping the episodes running at each one.
+/** For each entry, the other trackers' episodes running at its time. Sweeps through both in time order. */
+function episodesRunningAt(data: Data, entries: Entry[], episodes: Episode[]): Map<string, Episode[]> {
   const runningAt = new Map<string, Episode[]>();
-  let nextEpisode = 0;
-  let active: Episode[] = [];
+  let next = 0; // the next episode to start
+  let running: Episode[] = [];
   for (const e of entries) {
     const time = entryTime(e);
-    while (nextEpisode < episodes.length && episodes[nextEpisode].start <= time) active.push(episodes[nextEpisode++]);
-    active = active.filter(episode => episode.end >= time);
-    const running = active
+    while (next < episodes.length && episodes[next].start <= time) running.push(episodes[next++]);
+    running = running.filter(episode => episode.end >= time);
+    const others = running
       .filter(episode => episode.trackerId !== e.tracker_id)
-      .sort((a, b) => trackerSort(a.trackerId) - trackerSort(b.trackerId) || a.start - b.start);
-    if (running.length) runningAt.set(e.id, running);
+      .sort((a, b) => sortOrder(data, a.trackerId) - sortOrder(data, b.trackerId) || a.start - b.start);
+    if (others.length) runningAt.set(e.id, others);
   }
-
-  return { levelsByEpisode, episodeIdByEntry, timelineByEpisode, runningAt };
+  return runningAt;
 }
 
 /**
@@ -136,8 +134,8 @@ function timeline(data: Data, episode: Episode, during: Entry[]): string {
   const startDay = dayKey(episode.start);
   const items = during.slice(0, TIMELINE_LIMIT).map(e => {
     const time = entryTime(e);
-    const when = (dayKey(time) === startDay ? '' : dayKey(time).slice(5) + ' ') + clockTime(time);
-    return `${when} ${describeDuring(data, episode, e)}`;
+    const day = dayKey(time) === startDay ? '' : dayKey(time).slice(5) + ' ';
+    return `${day}${clockTime(time)} ${describeDuring(data, episode, e)}`;
   });
   if (during.length > TIMELINE_LIMIT) items.push(`… and ${during.length - TIMELINE_LIMIT} more`);
   return items.join(' · ');
@@ -154,12 +152,7 @@ function describeDuring(data: Data, episode: Episode, e: Entry): string {
   return entryText(e, data.trackers.get(e.tracker_id)!);
 }
 
-/** "Headache; Tired" and their episode ids, for the "during" columns. */
-const duringNames = (running: Episode[] | undefined, data: Data) =>
-  running?.map(episode => data.trackers.get(episode.trackerId)!.name).join('; ') || null;
-const duringIds = (running: Episode[] | undefined) => running?.map(episode => episode.id).join('; ') || null;
-
-/** The entries from a time-sorted list with from <= time <= to, found by binary search. */
+/** The entries with from <= time <= to, from a list sorted by time (found by binary search). */
 function entriesBetween(sorted: Entry[], from: number, to: number): Entry[] {
   let low = 0;
   let high = sorted.length;
@@ -173,16 +166,10 @@ function entriesBetween(sorted: Entry[], from: number, to: number): Entry[] {
   return found;
 }
 
-function checkinGroups(entries: Entry[]): { key: string; time: number; answers: Entry[] }[] {
-  const groups = new Map<string, { key: string; time: number; answers: Entry[] }>();
-  for (const e of entries) {
-    if (e.kind !== 'answer') continue;
-    const key = checkinKey(e);
-    if (!groups.has(key)) groups.set(key, { key, time: entryTime(e), answers: [] });
-    groups.get(key)!.answers.push(e);
-  }
-  return [...groups.values()].sort((a, b) => a.time - b.time);
-}
+/** "Headache; Tired" and their episode ids, for the "during" columns. */
+const duringNames = (running: Episode[] | undefined, data: Data) =>
+  running?.map(episode => data.trackers.get(episode.trackerId)!.name).join('; ') || null;
+const duringIds = (running: Episode[] | undefined) => running?.map(episode => episode.id).join('; ') || null;
 
 /* ---------- trackers ---------- */
 
@@ -265,27 +252,27 @@ function episodesTable({ data, entries, episodes, levelsByEpisode, timelineByEpi
       const tracker = data.trackers.get(episode.trackerId)!;
       const levels = levelsByEpisode.get(episode.id)!;
       const peak = levels.reduce<Entry | null>((best, e) => (!best || (e.value ?? 0) > (best.value ?? 0) ? e : best), null);
-      const ongoing = episode.status === 'ongoing';
-      const related = [entriesById.get(episode.id), episode.endEntryId ? entriesById.get(episode.endEntryId) : undefined, ...levels];
+      const ended = episode.status !== 'ongoing';
+      const own = [entriesById.get(episode.id), episode.endEntryId ? entriesById.get(episode.endEntryId) : undefined, ...levels];
       return [
         episode.id,
         tracker.name,
         localDateTime(episode.start),
-        ongoing ? null : localDateTime(episode.end),
-        round1((episode.end - episode.start) / MINUTE_MS), // so far, if ongoing
+        ended ? localDateTime(episode.end) : null,
+        round1((episode.end - episode.start) / MINUTE_MS), // so far, if it's still running
         episode.status,
         peak?.value ?? null,
         peak?.text ?? null,
         timelineByEpisode.get(episode.id)!,
-        joinText(related.map(e => e?.note ?? null)),
+        joinText(own.map(e => e?.note ?? null)),
         episode.trackerId,
         tracker.group_name || null,
         dayKey(episode.start),
         clockTime(episode.start),
-        ongoing ? null : dayKey(episode.end),
-        ongoing ? null : clockTime(episode.end),
+        ended ? dayKey(episode.end) : null,
+        ended ? clockTime(episode.end) : null,
         new Date(episode.start).toISOString(),
-        ongoing ? null : new Date(episode.end).toISOString(),
+        ended ? new Date(episode.end).toISOString() : null,
         levels.length,
         episode.endEntryId ?? null,
       ];
@@ -298,7 +285,6 @@ function episodesTable({ data, entries, episodes, levelsByEpisode, timelineByEpi
 function checkinsTable({ data, entries, trackers, names, runningAt }: Context): Table {
   const columns = ['checkin_id', 'datetime', 'date', 'time', 'weekday', 'timestamp_utc'];
   const cellsFor: ((answers: Entry[]) => Cell)[] = [];
-
   const add = (column: string, cell: (answers: Entry[]) => Cell) => {
     columns.push(column);
     cellsFor.push(cell);
@@ -333,26 +319,31 @@ function checkinsTable({ data, entries, trackers, names, runningAt }: Context): 
   }
   columns.push('during', 'notes');
 
+  // Entries are oldest first, so the check-ins are too.
+  const checkins = groupBy(entries.filter(e => e.kind === 'answer'), checkinKey);
   return {
     name: 'checkins',
     columns,
-    rows: checkinGroups(entries).map(({ key, time, answers }) => [
-      answers[0].checkin_id ?? key,
-      localDateTime(time),
-      dayKey(time),
-      clockTime(time),
-      weekday(time),
-      new Date(time).toISOString(),
-      ...cellsFor.map(cell => cell(answers)),
-      duringNames(runningAt.get(answers[0].id), data),
-      joinText(answers.filter(a => a.note).map(a => `${data.trackers.get(a.tracker_id)!.name}: ${a.note}`)),
-    ]),
+    rows: [...checkins].map(([key, answers]) => {
+      const time = entryTime(answers[0]);
+      return [
+        answers[0].checkin_id ?? key,
+        localDateTime(time),
+        dayKey(time),
+        clockTime(time),
+        weekday(time),
+        new Date(time).toISOString(),
+        ...cellsFor.map(cell => cell(answers)),
+        duringNames(runningAt.get(answers[0].id), data),
+        joinText(answers.filter(a => a.note).map(a => `${data.trackers.get(a.tracker_id)!.name}: ${a.note}`)),
+      ];
+    }),
   };
 }
 
 /* ---------- daily ---------- */
 
-/** A figure per day per tracker: day -> trackerId -> amount. */
+/** A figure per day per tracker: day -> tracker id -> amount. */
 type DayFigures = Map<string, Map<string, number>>;
 
 function addToDay(figures: DayFigures, day: string, trackerId: string, amount: number): void {
@@ -368,9 +359,7 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
     const today = dayKey(now);
     for (let day = dayKey(entryTime(entries[0])); day <= today; day = nextDay(day)) days.push(day);
   }
-
-  const entriesByDay = new Map<string, Entry[]>(days.map(day => [day, []]));
-  for (const e of entries) entriesByDay.get(dayKey(entryTime(e)))?.push(e);
+  const entriesByDay = groupBy(entries, e => dayKey(entryTime(e)));
 
   const startsByDay: DayFigures = new Map(); // episodes started
   const msByDay: DayFigures = new Map();     // time episodes were running, clipped at midnight
@@ -440,7 +429,7 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
     name: 'daily',
     columns,
     rows: days.map(day => {
-      const dayEntries = entriesByDay.get(day)!;
+      const dayEntries = entriesByDay.get(day) ?? [];
       const checkins = new Set(dayEntries.filter(e => e.kind === 'answer').map(checkinKey));
       return [day, weekday(dayStart(day)), checkins.size, ...cellsFor.map(cell => cell(day, dayEntries))];
     }),

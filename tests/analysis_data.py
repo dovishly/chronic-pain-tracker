@@ -1,7 +1,7 @@
 """The known data in fixtures/analysis.json, with names for the ids the tests look up.
 
-e2e_test.py checks the app's export of this data and schema_test.py checks the SQL views; both expect
-the same figures. Times in the comments are local (America/New_York); the file stores them in UTC.
+e2e_test.py checks the app's analysis export of this data; schema_test.py uses it as a user's rows.
+Times in the comments are local (America/New_York); the file stores them in UTC.
 """
 import json, os
 

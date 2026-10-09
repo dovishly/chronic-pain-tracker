@@ -1,55 +1,44 @@
-// Writes go to memory and IndexedDB, then the outbox for the next sync. Never to the network directly.
+// Saving on this device. A change goes to memory, then IndexedDB, then the outbox, which sync.ts uploads.
+// The network is never in the way of a tap.
 import { nowIso, prefs, uuid } from './util';
 import { db } from './db';
 import { trackers, entries, pendingKeys, dataChanged } from './data';
 import { STARTER_TRACKERS, normalizeEntry, normalizeTracker, type Entry, type Tracker } from './model';
-import { sync, type OutboxItem } from './sync';
+import { sync, syncState, type OutboxItem, type Table } from './sync';
 
-/** The row sent to Supabase: exactly the table's columns, with defaults filled in. */
-function trackerRow(t: Tracker) {
-  return {
-    id: t.id, name: t.name, type: t.type, group_name: t.group_name ?? null, color: t.color,
-    config: t.config || {}, sort_order: t.sort_order || 0, archived: !!t.archived, deleted: !!t.deleted,
-  };
-}
+// The rows to upload. Each has every column, even when empty: Supabase refuses a batch whose rows have
+// different fields. updated_at is left out because the server sets it.
 
-function entryRow(e: Entry) {
-  return {
-    id: e.id, tracker_id: e.tracker_id, occurred_at: e.occurred_at, kind: e.kind, value: e.value ?? null,
-    text: e.text ?? null, note: e.note ?? null, checkin_id: e.checkin_id ?? null, deleted: !!e.deleted,
-  };
-}
+const trackerRow = (t: Tracker) => ({
+  id: t.id, name: t.name, type: t.type, group_name: t.group_name ?? null, color: t.color,
+  config: t.config || {}, sort_order: t.sort_order || 0, archived: !!t.archived, deleted: !!t.deleted,
+});
 
-async function queueForSync(item: OutboxItem): Promise<void> {
-  pendingKeys.add(item.key);
-  await db.put('outbox', item);
-  sync.syncSoon();
-}
+const entryRow = (e: Entry) => ({
+  id: e.id, tracker_id: e.tracker_id, occurred_at: e.occurred_at, kind: e.kind, value: e.value ?? null,
+  text: e.text ?? null, note: e.note ?? null, checkin_id: e.checkin_id ?? null, deleted: !!e.deleted,
+});
 
-/** Saves an entry. Entries are never changed in place: pass a new object for an edit. */
-export async function saveEntry(entry: Entry): Promise<void> {
-  await saveEntries([entry]);
-}
+/** Saves trackers. Pass new objects for changed ones. */
+export const saveTrackers = (changed: Tracker[]) => save('trackers', trackers, changed, trackerRow);
 
-/** Saves several entries with one write to IndexedDB and one to the outbox. */
-export async function saveEntries(changed: Entry[]): Promise<void> {
+/** Saves entries. Entries are never changed in place: pass a new object for an edit. */
+export const saveEntries = (changed: Entry[]) => save('entries', entries, changed, entryRow);
+
+async function save<T extends Tracker | Entry>(
+  table: Table, inMemory: Map<string, T>, changed: T[], toRow: (item: T) => Record<string, unknown>,
+): Promise<void> {
+  if (!changed.length) return;
   const updatedAt = nowIso();
-  const saved = changed.map(entry => ({ ...entry, updated_at: updatedAt }));
-  for (const entry of saved) entries.set(entry.id, entry);
+  const saved = changed.map(item => ({ ...item, updated_at: updatedAt }));
+  for (const item of saved) inMemory.set(item.id, item);
   dataChanged();
-  await db.putMany('entries', saved);
-  const items: OutboxItem[] = saved.map(e => ({ key: 'entries:' + e.id, table: 'entries', updatedAt, row: entryRow(e) }));
-  for (const item of items) pendingKeys.add(item.key);
-  await db.putMany('outbox', items);
-  sync.syncSoon();
-}
+  await db.putMany(table, saved);
 
-export async function saveTracker(tracker: Tracker): Promise<void> {
-  const saved = { ...tracker, updated_at: nowIso() };
-  trackers.set(saved.id, saved);
-  dataChanged();
-  await db.put('trackers', saved);
-  await queueForSync({ key: 'trackers:' + saved.id, table: 'trackers', updatedAt: saved.updated_at, row: trackerRow(saved) });
+  const queued: OutboxItem[] = saved.map(item => ({ key: `${table}:${item.id}`, table, updatedAt, row: toRow(item) }));
+  for (const item of queued) pendingKeys.add(item.key);
+  await db.putMany('outbox', queued);
+  sync.syncSoon();
 }
 
 /** Loads everything from IndexedDB into memory. A brand-new device gets the starter trackers. */
@@ -72,15 +61,15 @@ export async function loadFromDevice(): Promise<void> {
 
   // Skip the starter set if this device is about to link to an account, which has its own trackers.
   if (!savedTrackers.length && !(await db.getMeta<boolean>('seeded'))) {
-    if (!sync.get().projectUrl) await addStarterTrackers();
+    if (!syncState.get().projectUrl) await addStarterTrackers();
     await db.setMeta('seeded', true);
   }
 }
 
-export async function addStarterTrackers(): Promise<void> {
-  for (const [i, starter] of STARTER_TRACKERS.entries()) {
-    await saveTracker({ id: uuid(), ...starter, sort_order: i * 10, archived: false, deleted: false });
-  }
+export function addStarterTrackers(): Promise<void> {
+  return saveTrackers(STARTER_TRACKERS.map((starter, i) => (
+    { id: uuid(), ...starter, sort_order: i * 10, archived: false, deleted: false }
+  )));
 }
 
 /** Erases everything Logbook keeps on this device: trackers, entries, the outbox and all settings. */

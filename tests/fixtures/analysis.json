@@ -1,5 +1,5 @@
 {
- "about": "Test data for the analysis export (tests/e2e_test.py) and the SQL views (tests/schema_test.py). Local times are America/New_York. Both tests check the same expected figures.",
+ "about": "Known data with hand-checked figures for the analysis export (tests/e2e_test.py); tests/schema_test.py uses it too. Local times are America/New_York.",
  "timezone": "America/New_York",
  "trackers": [
   {

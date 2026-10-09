@@ -1,5 +1,6 @@
-// Field names on trackers and entries are the Supabase column names.
-import { dayKey, nowIso, uuid, unhandled } from './util';
+// The data model: trackers, entries, and what's derived from them (episodes, days, labels).
+// Field names on trackers and entries are the Supabase column names, so rows go to and from it as they are.
+import { dayKey, groupBy, nowIso, uuid, unhandled } from './util';
 
 /* ---------- types ---------- */
 
@@ -23,7 +24,7 @@ export interface Tracker {
   name: string;
   type: TrackerType;
   group_name: string | null; // heading the tracker is listed under; null or '' means "Other"
-  color: string;          // one of COLORS, or a custom "#rrggbb"
+  color: string;          // a preset color key (COLORS in components/color.ts), or a custom "#rrggbb"
   config: TrackerConfig;
   sort_order: number;
   archived: boolean;
@@ -51,13 +52,13 @@ export interface Entry {
   updated_at?: string;
 }
 
-/** Trackers and entries as the UI sees them. A new object (same maps) after every change. */
+/** Trackers and entries as components see them: a new object (same maps) after every change. */
 export interface Data {
   trackers: ReadonlyMap<string, Tracker>;
   entries: ReadonlyMap<string, Entry>;
 }
 
-/* ---------- constants ---------- */
+/* ---------- tracker types ---------- */
 
 export const TYPE_LABELS: Record<TrackerType, string> = {
   rating: 'Rating',
@@ -79,16 +80,6 @@ export const TYPE_HELP: Record<TrackerType, string> = {
 
 /** Tracker types answered in a check-in (the rest are tapped on Today). */
 export const CHECKIN_TYPES: TrackerType[] = ['rating', 'number', 'choice', 'text'];
-
-/** Color keys; each maps to a CSS variable --c-<key> in styles.css. */
-export const COLORS = ['indigo', 'amber', 'teal', 'rose', 'violet', 'green', 'slate', 'sky'];
-
-/** A color picked with the custom color picker, rather than one of COLORS. */
-export const isCustomColor = (color: string) => /^#[0-9a-f]{6}$/i.test(color);
-
-/** CSS value for a tracker's color; unknown keys fall back to slate. */
-export const colorVar = (color: string) =>
-  isCustomColor(color) ? color : `var(--c-${COLORS.includes(color) ? color : 'slate'})`;
 
 /** Starting config when a tracker is created with, or switched to, each type. */
 export function defaultConfig(type: TrackerType): TrackerConfig {
@@ -124,11 +115,11 @@ export const STARTER_TRACKERS: StarterTracker[] = [
   { name: 'Meal', type: 'moment', group_name: 'Moments', color: 'green', config: {} },
 ];
 
-/* ---------- data from storage or the server ---------- */
+/* ---------- rows from IndexedDB or Supabase ---------- */
 
-/** Fills in defaults for a tracker from IndexedDB or Supabase: older rows may lack newer fields. */
+/** A tracker as stored, with defaults for fields that older rows lack and without server-only columns. */
 export function normalizeTracker(raw: Record<string, unknown>): Tracker {
-  const { user_id: _user, created_at: _created, ...tracker } = raw; // server-only columns
+  const { user_id: _user, created_at: _created, ...tracker } = raw;
   return { ...tracker, config: tracker.config || {}, deleted: !!tracker.deleted } as Tracker;
 }
 
@@ -137,6 +128,17 @@ export function normalizeEntry(raw: Record<string, unknown>): Entry {
   // Postgres numeric can arrive as a string.
   return { ...entry, value: entry.value == null ? null : Number(entry.value) } as Entry;
 }
+
+/* ---------- deleting ---------- */
+
+// A deleted tracker or entry stays as a row marked deleted, so the deletion reaches every device, but it keeps
+// nothing of what it held. The triggers in schema.sql wipe the same fields on the server.
+
+export const deletedTracker = (tracker: Tracker): Tracker =>
+  ({ ...tracker, deleted: true, name: '', group_name: null, config: {} });
+
+export const deletedEntry = (entry: Entry): Entry =>
+  ({ ...entry, deleted: true, value: null, text: null, note: null });
 
 /* ---------- entries ---------- */
 
@@ -156,7 +158,7 @@ export function newEntry(trackerId: string, kind: EntryKind, fields: Partial<Ent
   };
 }
 
-// Entries are never changed in place (edits save a new object), so each one's parsed time can be cached.
+// Entries are never changed in place (an edit saves a new object), so each one's parsed time can be cached.
 const timeCache = new WeakMap<Entry, number>();
 
 /** An entry's time in ms. */
@@ -170,6 +172,8 @@ export function entryTime(entry: Entry): number {
 }
 
 export const byTime = (a: Entry, b: Entry) => entryTime(a) - entryTime(b);
+
+export const isStartOrEnd = (entry: Entry) => entry.kind === 'start' || entry.kind === 'end';
 
 /** Entries that aren't deleted and whose tracker exists and isn't deleted. */
 export const liveEntries = (data: Data) =>
@@ -207,33 +211,23 @@ export function entryText(entry: Entry, tracker: Tracker): string {
 
 /* ---------- trackers ---------- */
 
-/** Trackers in display order, of the given types (null for all). */
-export function sortedTrackers(
-  data: Data,
-  types: TrackerType | TrackerType[] | null = null,
-  { includeArchived = false } = {},
-): Tracker[] {
-  const wanted = types == null ? null : ([] as TrackerType[]).concat(types);
-  return [...data.trackers.values()]
-    .filter(t => !t.deleted && (!wanted || wanted.includes(t.type)) && (includeArchived || !t.archived))
-    .sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
-}
+const inDisplayOrder = (a: Tracker, b: Tracker) => a.sort_order - b.sort_order || a.name.localeCompare(b.name);
+
+/** Every tracker that isn't deleted, archived ones included, in display order. */
+export const allTrackers = (data: Data) =>
+  [...data.trackers.values()].filter(t => !t.deleted).sort(inDisplayOrder);
+
+/** Trackers in use (not archived), in display order: those of the given types, or all of them. */
+export const activeTrackers = (data: Data, ...types: TrackerType[]) =>
+  allTrackers(data).filter(t => !t.archived && (!types.length || types.includes(t.type)));
 
 export const groupName = (tracker: Tracker) => tracker.group_name || 'Other';
 
+/** [heading, trackers] pairs, in order of each heading's first tracker. */
+export const groupTrackers = (trackers: Tracker[]) => [...groupBy(trackers, groupName)];
+
 /** The label of a rating or severity level (1-based), or null if the tracker has none for it. */
 export const levelLabel = (tracker: Tracker, level: number) => (tracker.config.levels || [])[level - 1] || null;
-
-/** [groupName, trackers] pairs, groups in order of first appearance. */
-export function groupTrackers(trackers: Tracker[]): [string, Tracker[]][] {
-  const groups = new Map<string, Tracker[]>();
-  for (const tracker of trackers) {
-    const name = groupName(tracker);
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name)!.push(tracker);
-  }
-  return [...groups];
-}
 
 /** Why a tracker can't be saved, or null if it can. */
 export function trackerProblem(tracker: Pick<Tracker, 'name' | 'type' | 'config'>): string | null {
@@ -247,67 +241,63 @@ export function trackerProblem(tracker: Pick<Tracker, 'name' | 'type' | 'config'
 
 /* ---------- episodes ---------- */
 
-export interface ActiveEpisode {
-  since: number;
-  level: number | null;   // latest severity logged during the episode
-  label: string | null;
-}
-
+/** A stretch of a start/stop tracker: from a start to the tracker's next start or end. */
 export interface Episode {
   id: string;             // the start entry's id
   trackerId: string;
   start: number;
-  end: number;            // "now" for an episode that's still running
-  endEntryId?: string;
+  end: number;            // now, for one that's still running
+  endEntryId?: string;    // the end entry, if it has one
   // ended: closed by an end entry; restarted: closed by a later start without an end in between;
   // ongoing: still running.
   status: 'ended' | 'restarted' | 'ongoing';
 }
 
-const isEpisodeEvent = (e: Entry) => e.kind === 'start' || e.kind === 'end';
-
-/** Episodes running right now, keyed by tracker id. Archived trackers are left out. */
-export function activeEpisodes(data: Data): Record<string, ActiveEpisode> {
-  const active: Record<string, ActiveEpisode> = {};
-  const events = liveEntries(data).filter(e => isEpisodeEvent(e) || e.kind === 'level').sort(byTime);
-  for (const e of events) {
-    const id = e.tracker_id;
-    if (e.kind === 'start') {
-      active[id] = { since: entryTime(e), level: null, label: null };
-    } else if (e.kind === 'end') {
-      delete active[id];
-    } else if (active[id]) {
-      active[id].level = e.value;
-      active[id].label = e.text;
-    }
-  }
-  for (const id of Object.keys(active)) {
-    const tracker = data.trackers.get(id);
-    if (!tracker || tracker.archived || tracker.deleted) delete active[id];
-  }
-  return active;
-}
-
-/**
- * Every start/stop episode, oldest first. A second start without an end in between
- * closes the earlier episode at that point.
- */
+/** Every episode, oldest first. */
 export function allEpisodes(data: Data): Episode[] {
   const episodes: Episode[] = [];
-  const openStarts: Record<string, Entry> = {}; // trackerId -> its unmatched start entry
-  const close = (startEntry: Entry, end: number, status: Episode['status'], endEntryId?: string) =>
-    episodes.push({ id: startEntry.id, trackerId: startEntry.tracker_id, start: entryTime(startEntry), end, status, endEntryId });
+  const openStarts = new Map<string, Entry>(); // tracker id -> its start without an end yet
+  const close = (start: Entry, end: number, status: Episode['status'], endEntryId?: string) =>
+    episodes.push({ id: start.id, trackerId: start.tracker_id, start: entryTime(start), end, status, endEntryId });
 
-  for (const e of liveEntries(data).filter(isEpisodeEvent).sort(byTime)) {
-    const openStart = openStarts[e.tracker_id];
+  for (const e of liveEntries(data).filter(isStartOrEnd).sort(byTime)) {
+    const openStart = openStarts.get(e.tracker_id);
     if (e.kind === 'start') {
       if (openStart) close(openStart, entryTime(e), 'restarted');
-      openStarts[e.tracker_id] = e;
+      openStarts.set(e.tracker_id, e);
     } else if (openStart) {
       close(openStart, entryTime(e), 'ended', e.id);
-      delete openStarts[e.tracker_id];
+      openStarts.delete(e.tracker_id);
+    } // an end with no start before it ends nothing
+  }
+  for (const start of openStarts.values()) close(start, Date.now(), 'ongoing');
+  return episodes.sort((a, b) => a.start - b.start);
+}
+
+/** The notes on an episode's start and end. */
+export const episodeNotes = (data: Data, episode: Episode) =>
+  [episode.id, episode.endEntryId].map(id => (id ? data.entries.get(id)?.note : null)).filter((note): note is string => !!note);
+
+export interface RunningEpisode {
+  since: number;
+  level: number | null;   // the latest severity logged since it started
+  label: string | null;
+}
+
+/** The episodes running now, by tracker id, oldest first. Archived trackers are left out. */
+export function runningEpisodes(data: Data): Map<string, RunningEpisode> {
+  const running = new Map<string, RunningEpisode>();
+  for (const episode of allEpisodes(data)) {
+    if (episode.status === 'ongoing' && !data.trackers.get(episode.trackerId)!.archived) {
+      running.set(episode.trackerId, { since: episode.start, level: null, label: null });
     }
   }
-  for (const startEntry of Object.values(openStarts)) close(startEntry, Date.now(), 'ongoing');
-  return episodes.sort((a, b) => a.start - b.start);
+  for (const level of liveEntries(data).filter(e => e.kind === 'level').sort(byTime)) {
+    const episode = running.get(level.tracker_id);
+    if (episode && entryTime(level) >= episode.since) {
+      episode.level = level.value;
+      episode.label = level.text;
+    }
+  }
+  return running;
 }

@@ -1,8 +1,8 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import { useData } from '../../hooks';
-import { TYPE_LABELS, groupTrackers, sortedTrackers, type Tracker } from '../../lib/model';
+import { TYPE_LABELS, activeTrackers, allTrackers, groupTrackers, type Tracker } from '../../lib/model';
 import { deleteTracker, moveTracker, restoreTracker } from '../../lib/actions';
-import { colorStyle } from '../../components/style';
+import { colorStyle } from '../../components/color';
 
 function TrackerRow({ tracker, children }: { tracker: Tracker; children: ReactNode }) {
   return (
@@ -19,7 +19,7 @@ function TrackerRow({ tracker, children }: { tracker: Tracker; children: ReactNo
 
 /** Active trackers by group, with buttons to reorder (within the group) and edit. */
 export function TrackerList({ onEdit }: { onEdit: (trackerId: string) => void }) {
-  const groups = groupTrackers(sortedTrackers(useData()));
+  const groups = groupTrackers(activeTrackers(useData()));
   return (
     <div id="trackers">
       {groups.length ? (
@@ -48,7 +48,7 @@ export function TrackerList({ onEdit }: { onEdit: (trackerId: string) => void })
 
 /** Archived trackers, to restore or delete. Delete takes a second tap. */
 export function ArchivedTrackers() {
-  const archived = sortedTrackers(useData(), null, { includeArchived: true }).filter(t => t.archived);
+  const archived = allTrackers(useData()).filter(t => t.archived);
   const [confirming, setConfirming] = useState<string | null>(null);
   if (!archived.length) return null;
   return (

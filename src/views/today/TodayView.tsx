@@ -1,8 +1,8 @@
 import { useNow, useData } from '../../hooks';
-import { formatDuration, startedAt } from '../../lib/util';
-import { activeEpisodes, groupTrackers, sortedTrackers, type ActiveEpisode, type Tracker } from '../../lib/model';
+import { formatDayTime, formatDuration } from '../../lib/util';
+import { activeTrackers, groupTrackers, runningEpisodes, type RunningEpisode, type Tracker } from '../../lib/model';
 import { logLevel, logMoment, toggleEpisode } from '../../lib/actions';
-import { colorStyle } from '../../components/style';
+import { colorStyle } from '../../components/color';
 import { DaySection } from './DaySection';
 
 const CLOCK_REFRESH_MS = 30_000; // keeps running durations current
@@ -15,18 +15,17 @@ interface Props {
 export function TodayView({ shownDay, onShowDay }: Props) {
   const data = useData();
   const now = useNow(CLOCK_REFRESH_MS);
-  const active = activeEpisodes(data);
-  const running = Object.entries(active);
-  const episodeGroups = groupTrackers(sortedTrackers(data, 'episode'));
-  const moments = sortedTrackers(data, 'moment');
+  const running = runningEpisodes(data);
+  const episodeGroups = groupTrackers(activeTrackers(data, 'episode'));
+  const moments = activeTrackers(data, 'moment');
 
   return (
     <section id="view-today" className="stack spacious">
       <section aria-labelledby="running-heading">
         <h2 id="running-heading">On now</h2>
         <div className="running-list" id="running">
-          {running.length ? (
-            running.map(([trackerId, episode]) => (
+          {running.size ? (
+            [...running].map(([trackerId, episode]) => (
               <RunningPill key={trackerId} tracker={data.trackers.get(trackerId)!} episode={episode} now={now} />
             ))
           ) : (
@@ -42,7 +41,7 @@ export function TodayView({ shownDay, onShowDay }: Props) {
               <h2>{group}</h2>
               <div className="episode-grid">
                 {trackers.map(tracker => (
-                  <EpisodeCard key={tracker.id} tracker={tracker} episode={active[tracker.id]} now={now} />
+                  <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} />
                 ))}
               </div>
             </section>
@@ -78,14 +77,14 @@ export function TodayView({ shownDay, onShowDay }: Props) {
 }
 
 /** A running episode at the top of Today. Tapping it ends the episode. */
-function RunningPill({ tracker, episode, now }: { tracker: Tracker; episode: ActiveEpisode; now: number }) {
+function RunningPill({ tracker, episode, now }: { tracker: Tracker; episode: RunningEpisode; now: number }) {
   return (
     <button
       type="button"
       className="running-pill"
       style={colorStyle(tracker.color)}
       data-episode={tracker.id}
-      aria-label={`End ${tracker.name}, running since ${startedAt(episode.since)}`}
+      aria-label={`End ${tracker.name}, running since ${formatDayTime(episode.since)}`}
       onClick={() => toggleEpisode(tracker.id)}
     >
       {tracker.name}
@@ -96,10 +95,10 @@ function RunningPill({ tracker, episode, now }: { tracker: Tracker; episode: Act
 }
 
 /** A start/stop button. While running, it shows how long, plus severity buttons if the tracker has levels. */
-function EpisodeCard({ tracker, episode, now }: { tracker: Tracker; episode?: ActiveEpisode; now: number }) {
+function EpisodeCard({ tracker, episode, now }: { tracker: Tracker; episode?: RunningEpisode; now: number }) {
   const levels = (tracker.config.levels || []).filter(Boolean);
   const status = episode
-    ? `Since ${startedAt(episode.since)} · ${formatDuration(now - episode.since)} · tap to end`
+    ? `Since ${formatDayTime(episode.since)} · ${formatDuration(now - episode.since)} · tap to end`
     : 'Tap when it starts';
 
   return (
