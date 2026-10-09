@@ -1,6 +1,5 @@
 # Logbook
 
-<<<<<<< HEAD
 My symptoms change hour to hour, so I'm building a logbook that keeps up.
 
 I couldn't find an app that did **everything** I needed it to do, so now here comes another one made for the frustrated "complex cases" who are hurting, yet somehow still expected to prove it's real. I'm tired, and I'm tired of getting ten minutes with a doctor and being told to come back in six months, in case the joint pain I've had for ten years magically goes away.
@@ -15,7 +14,6 @@ Logbook is **one tap**.
 Each tap lands on the timeline by itself the moment it happens. It changes all day, the same way I do.
 
 Because every tap is its own timestamped record, the data is ready to analyze: how often something happens, how long it lasts, and what came right before it. Export it to a spreadsheet anytime.
-=======
 A personal tracker that runs as a Home Screen app on your phone. You choose what to track. It works offline and syncs to your own private database.
 
 - **Today:** start/stop buttons for things that come and go (tap when it starts, tap again when it stops), one-tap moments, and the day's timeline: everything you logged, newest first, with each episode drawn as a bar alongside. Tap any entry to change its time or note.
@@ -230,4 +228,3 @@ To try it: `npm run db:start`, `npm run db:user -- me@example.com`, `npm run dev
 | "Offline · 3 waiting" | Those entries are saved on the phone and upload automatically when you're back online. |
 | "Email rate limit exceeded" | Supabase sends only a couple of sign-in emails an hour. Sign in with your password, or wait an hour. |
 | Signed out after a long time away | Sign in again. Your entries on the phone are still there. |
->>>>>>> app

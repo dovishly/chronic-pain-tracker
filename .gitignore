@@ -3,10 +3,7 @@ dist/
 dev-dist/
 tests/screenshots/
 __pycache__/
-<<<<<<< HEAD
-=======
 .pytest_cache/
->>>>>>> app
 .DS_Store
 .env
 .env.*
