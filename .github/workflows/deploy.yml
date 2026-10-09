@@ -23,7 +23,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.x'
+          python-version: '3.12' # the newest pgserver (schema tests) has builds for
       - run: pip install pytest playwright pgserver "psycopg[binary]" && python -m playwright install --with-deps chromium
       - run: python -m pytest tests/e2e_test.py
       - run: python -m pytest tests/schema_test.py

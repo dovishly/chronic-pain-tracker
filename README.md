@@ -74,7 +74,7 @@ You need Node.js. Run these in this folder.
 
 ### Tests
 
-The tests need Python packages once: `pip install pytest playwright pgserver "psycopg[binary]" && python -m playwright install chromium`.
+The tests need Python 3.12.
 
 | Command | What it does |
 |---|---|
