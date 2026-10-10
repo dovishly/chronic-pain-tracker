@@ -1,7 +1,7 @@
 import { useNow, useData } from '../../hooks';
-import { dayKey, dayStart, formatDuration } from '../../lib/util';
+import { formatDuration } from '../../lib/util';
 import {
-  activeTrackers, entryTime, groupTrackers, liveEntries, runningEpisodes, type Data, type RunningEpisode, type Tracker,
+  activeTrackers, groupTrackers, runningEpisodes, type RunningEpisode, type Tracker,
 } from '../../lib/model';
 import { logLevel, logMoment, startAtLevel, toggleEpisode } from '../../lib/actions';
 import { colorStyle } from '../../components/color';
@@ -24,7 +24,6 @@ export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
   const running = runningEpisodes(data);
   // Under the headings the person gave them, start/stop tiles first and one-tap buttons after.
   const groups = groupTrackers(activeTrackers(data, 'episode', 'moment'));
-  const momentsToday = countMomentsToday(data, now);
 
   return (
     <section id="view-today" className="stack spacious">
@@ -51,7 +50,7 @@ export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
                 {moments.length > 0 && (
                   <div className="moment-buttons">
                     {moments.map(tracker => (
-                      <MomentButton key={tracker.id} tracker={tracker} count={momentsToday.get(tracker.id) ?? 0} />
+                      <MomentButton key={tracker.id} tracker={tracker} />
                     ))}
                   </div>
                 )}
@@ -74,32 +73,20 @@ export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
   );
 }
 
-/** A one-tap button: a pill with a "+", and how many times it's been logged today. */
-function MomentButton({ tracker, count }: { tracker: Tracker; count: number }) {
+/** A one-tap button: a pill with a "+". How many times it was logged is in the day's totals below. */
+function MomentButton({ tracker }: { tracker: Tracker }) {
   return (
     <button
       type="button"
       className="moment-button"
       style={colorStyle(tracker.color)}
       data-moment={tracker.id}
-      aria-label={count ? `${tracker.name}, ${count} today` : undefined}
       onClick={() => logMoment(tracker.id)}
     >
       <span className="moment-plus" aria-hidden="true">+</span>
       {tracker.name}
-      {count > 0 && <span className="moment-count mono">×{count}</span>}
     </button>
   );
-}
-
-/** How many times each moment tracker has been logged since midnight, by tracker id. */
-function countMomentsToday(data: Data, now: number): Map<string, number> {
-  const since = dayStart(dayKey(now));
-  const counts = new Map<string, number>();
-  for (const entry of liveEntries(data)) {
-    if (entry.kind === 'moment' && entryTime(entry) >= since) counts.set(entry.tracker_id, (counts.get(entry.tracker_id) ?? 0) + 1);
-  }
-  return counts;
 }
 
 /**

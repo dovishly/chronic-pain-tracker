@@ -723,12 +723,6 @@ textarea {
   margin-right: -2px;
 }
 
-/* How many times today, e.g. "×2". */
-.moment-count {
-  font-size: .85rem;
-  font-weight: 400;
-}
-
 /* ===================== Today: one day ===================== */
 
 .day-nav {

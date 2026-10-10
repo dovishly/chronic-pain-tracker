@@ -388,7 +388,7 @@ def test_start_and_stop_episodes(phone1):
 
 def test_moments_and_the_days_log(phone1):
     phone1.locator('.moment-button', has_text='Medication').click()
-    expect(phone1.locator('.moment-button', has_text='Medication')).to_have_attribute('aria-label', 'Medication, 1 today')
+    expect(phone1.locator('.day-total', has_text='Medication')).to_have_text('Medication 1×')
     log = phone1.locator('#day-log')
     expect(log).to_contain_text('Medication')
     expect(log).to_contain_text('Fatigue · until')  # one row for the whole episode
