@@ -1,23 +1,23 @@
 // The outbox: changes made on this device that haven't uploaded yet, kept in IndexedDB so they outlast the app
-// being closed. store.ts queues each change in the same transaction that saves it, so nothing is saved without
+// being closed. local.ts queues each change in the same transaction that saves it, so nothing is saved without
 // being queued; sync.ts uploads them and then takes them out.
 import { db } from './db';
-import type { Table, UploadRow } from './model';
+import type { TableName, UploadRow } from './model';
 
 /** A local change waiting to upload. updatedAt is the row's updated_at when queued, to tell if it changed since. */
-export interface OutboxItem { key: string; table: Table; updatedAt: string; row: UploadRow }
+export interface OutboxItem { key: string; table: TableName; updatedAt: string; row: UploadRow }
 
 /** What's waiting: each item's key ("table:id") and the updatedAt of its latest change. Mirrors the outbox store. */
 const waiting = new Map<string, string>();
 
-const keyOf = (table: Table, id: string) => `${table}:${id}`;
+const keyOf = (table: TableName, id: string) => `${table}:${id}`;
 
 export const outbox = {
   /** How many changes are waiting. */
   size: () => waiting.size,
 
   /** Whether a row has a change on this device that hasn't uploaded yet. */
-  has: (table: Table, id: string) => waiting.has(keyOf(table, id)),
+  has: (table: TableName, id: string) => waiting.has(keyOf(table, id)),
 
   /** Notes what was still waiting when the app last closed. */
   async load(): Promise<void> {
@@ -25,7 +25,7 @@ export const outbox = {
   },
 
   /** Items for rows just saved, counted as waiting from now on. Put them in the same transaction as the rows. */
-  queue(table: Table, rows: UploadRow[], updatedAt: string): OutboxItem[] {
+  queue(table: TableName, rows: UploadRow[], updatedAt: string): OutboxItem[] {
     return rows.map(row => {
       const key = keyOf(table, row.id);
       waiting.set(key, updatedAt);

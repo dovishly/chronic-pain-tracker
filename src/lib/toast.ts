@@ -26,7 +26,11 @@ export function toast(message: string, actions: ToastAction[] = []): void {
   timer = setTimeout(() => toastStore.set(null), TOAST_MS);
 }
 
-/** Wraps an async function so a failure shows a toast. It then resolves to undefined. */
+/**
+ * Wraps an async function so a failure shows a toast. It then resolves to undefined. A function only ever started
+ * by a tap is wrapped where it's defined (the actions, the exports); one that other code calls too, like sync's,
+ * is wrapped by the view that taps it.
+ */
 export function safely<Args extends unknown[], Result>(action: (...args: Args) => Promise<Result>) {
   return async (...args: Args): Promise<Result | undefined> => {
     try {

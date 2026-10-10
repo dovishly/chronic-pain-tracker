@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useData } from '../../hooks';
 import {
-  COLORS, TYPE_HELP, TYPE_LABELS, allTrackers, defaultConfig, liveEntries, trackerProblem,
+  COLORS, TRACKER_TYPES, TYPE_HELP, TYPE_LABELS, allTrackers, defaultConfig, liveEntries, trackerProblem,
   type Tracker, type TrackerConfig, type TrackerType,
 } from '../../lib/model';
 import { archiveTracker, deleteTracker, saveTrackerEdit } from '../../lib/actions';
@@ -132,7 +132,7 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
       <label className="field">
         Type
         <select id="editor-type" value={type} disabled={typeLocked} onChange={e => changeType(e.target.value as TrackerType)}>
-          {(Object.keys(TYPE_LABELS) as TrackerType[]).map(t => (
+          {TRACKER_TYPES.map(t => (
             <option key={t} value={t}>{TYPE_LABELS[t]}</option>
           ))}
         </select>

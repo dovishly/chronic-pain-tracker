@@ -1,4 +1,4 @@
-// What the person does that changes data. Each action saves through store.ts and says what it did in a
+// What the person does that changes data. Each action saves through local.ts and says what it did in a
 // toast. Wrapped in safely(), so a failure shows a toast too and components call them without try/catch.
 import { MINUTE_MS, clockTime, formatTime, formatDuration, uuid, unhandled } from './util';
 import { dataStore } from './data';
@@ -7,8 +7,9 @@ import {
   levelLabel, newEntry, runningEpisodes, type Entry, type EntryKind, type Episode, type Tracker,
 } from './model';
 import { arrangedTrackers, type Layout } from './layout';
-import { addStarterTrackers, eraseDevice, saveEntries, saveTrackers } from './store';
-import { sync } from './sync';
+import { backupContents, type Backup } from './backup';
+import { addStarterTrackers, clearData, eraseDevice, saveEntries, saveTrackers } from './local';
+import { sync, syncState } from './sync';
 import { toast, safely } from './toast';
 
 const data = () => dataStore.get();
@@ -286,5 +287,20 @@ export const resetEverywhere = safely(async () => {
   await saveEntries([...entries.values()].filter(e => !e.deleted).map(deletedEntry));
   await addStarterTrackers();
   toast('Everything was reset. Your other devices catch up when they next sync.');
+  return true;
+});
+
+/* ---------- backups ---------- */
+
+/**
+ * Replaces this device's trackers and entries with a backup's (see readBackup()). Only on a device without sync:
+ * one that syncs gets its data from the account. If it connects later, the restored data is what it uploads.
+ */
+export const restoreBackup = safely(async (backup: Backup) => {
+  if (syncState.get().projectUrl) throw new Error('Disconnect from Supabase before restoring a backup.');
+  await clearData();
+  await saveTrackers(backup.trackers);
+  await saveEntries(backup.entries);
+  toast(`Restored ${backupContents(backup)}.`);
   return true;
 });

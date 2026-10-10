@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { loadFromDevice } from './lib/store';
+import { loadFromDevice } from './lib/local';
 import { sync } from './lib/sync';
 import './lib/theme';
 import './styles.css';

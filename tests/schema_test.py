@@ -4,8 +4,8 @@ Checks that the file can be run again over existing data, that it allows the sam
 entry kinds as the app, that deletions are final, and that row-level security keeps users apart.
 The data is the known data in tests/fixtures/analysis.json.
 
-Run:  pip install pytest pgserver "psycopg[binary]"
-      python -m pytest tests/schema_test.py
+Run:  pip install -r tests/requirements.txt
+      npm run test:schema
 """
 import datetime, os, re, tempfile, uuid
 from contextlib import contextmanager

@@ -426,14 +426,3 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
     }),
   };
 }
-
-/* ---------- CSV ---------- */
-
-function csvCell(value: Cell): string {
-  const text = value == null ? '' : String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-export function toCsv(table: Table): string {
-  return [table.columns, ...table.rows].map(row => row.map(csvCell).join(',')).join('\n');
-}

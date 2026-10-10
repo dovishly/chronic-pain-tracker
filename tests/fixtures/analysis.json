@@ -1,5 +1,5 @@
 {
- "about": "Known data with hand-checked figures for the analysis export (tests/e2e_test.py); tests/schema_test.py uses it too. Local times are America/New_York.",
+ "about": "Known data with hand-checked figures for the analysis export (tests/export_test.py); tests/schema_test.py uses it too. Local times are America/New_York.",
  "timezone": "America/New_York",
  "trackers": [
   {

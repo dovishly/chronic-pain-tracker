@@ -123,7 +123,7 @@ export interface Tables {
   entries: Entry;
 }
 
-export type Table = keyof Tables;
+export type TableName = keyof Tables;
 
 /** A tracker as stored, with defaults for fields that older rows lack and without server-only columns. */
 export function normalizeTracker(raw: Record<string, unknown>): Tracker {

@@ -1456,13 +1456,21 @@ textarea {
   border-color: var(--ink);
 }
 
-.custom-color:focus-within {
+/* Restore backup: a label dressed as a button, with the file picker over it. */
+.file-button {
+  position: relative;
+  cursor: pointer;
+}
+
+.custom-color:focus-within,
+.file-button:focus-within {
   outline: 3px solid var(--c-sky);
   outline-offset: 2px;
 }
 
-/* Invisible, covering the swatch, so a tap opens the picker. */
-.custom-color input {
+/* Invisible, covering the swatch or the button, so a tap opens the picker. */
+.custom-color input,
+.file-button input {
   position: absolute;
   inset: 0;
   width: 100%;

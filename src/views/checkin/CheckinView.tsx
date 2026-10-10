@@ -1,11 +1,11 @@
 import { useEffect, type Dispatch, type SetStateAction } from 'react';
-import { useData } from '../hooks';
-import { toDateTimeInputValue, unhandled } from '../lib/util';
-import { CHECKIN_TYPES, activeTrackers, groupTrackers, type Tracker } from '../lib/model';
-import { saveCheckin, type Answer } from '../lib/actions';
-import { colorStyle } from '../components/color';
-import { AddLink } from '../components/AddLink';
-import type { NewTrackerRequest } from '../navigation';
+import { useData } from '../../hooks';
+import { toDateTimeInputValue, unhandled } from '../../lib/util';
+import { CHECKIN_TYPES, activeTrackers, groupTrackers, type Tracker } from '../../lib/model';
+import { saveCheckin, type Answer } from '../../lib/actions';
+import { colorStyle } from '../../components/color';
+import { AddLink } from '../../components/AddLink';
+import type { NewTrackerRequest } from '../../navigation';
 
 export interface CheckinDraft {
   answers: Record<string, Answer>; // trackerId -> answer

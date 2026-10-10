@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { useData, useSyncState, useTheme } from '../../hooks';
 import { setTheme, type ThemeChoice } from '../../lib/theme';
 import { CheckIcon } from '../../components/icons';
-import { dayKey, dayLabel } from '../../lib/util';
+import { dayKey, dayLabel, formatDate } from '../../lib/util';
 import { entryTime, liveEntries, newTracker, type Tracker } from '../../lib/model';
 import { exportBackup, exportForAnalysis } from '../../lib/export';
-import { resetDevice, resetEverywhere } from '../../lib/actions';
-import { safely } from '../../lib/toast';
+import { backupContents, entriesNotInBackup, readBackup, type Backup } from '../../lib/backup';
+import { resetDevice, resetEverywhere, restoreBackup } from '../../lib/actions';
 import type { NewTrackerRequest } from '../../navigation';
 import { TrackerEditor } from './TrackerEditor';
 import { ArchivedTrackers, TrackerList } from './TrackerList';
@@ -73,18 +73,7 @@ export function SettingsView({ addRequest, onAddDone }: Props) {
       <section>
         <h2>Your data</h2>
         <div className="panel stack">
-          <p className="small muted">
-            Everything is saved on this device first. <b>Export for analysis</b> gives one .zip of five spreadsheets (CSV)
-            that line up by date and id: daily, check-ins, episodes, entries and trackers. <b>Export backup</b> is
-            one file with everything.
-          </p>
-          <div className="button-row">
-            <button className="button primary" id="export-analysis" type="button" onClick={safely(exportForAnalysis)}>
-              Export for analysis
-            </button>
-            <button className="button" id="export-backup" type="button" onClick={safely(exportBackup)}>Export backup</button>
-          </div>
-          <p className="small muted">{dataStats(liveEntries(data).map(entryTime))}</p>
+          <YourData />
         </div>
       </section>
 
@@ -114,6 +103,75 @@ function Appearance() {
         ))}
       </div>
       <p className="small muted">Match device switches between light and dark with your device.</p>
+    </>
+  );
+}
+
+/**
+ * The exports, and Restore backup on a device without sync (one that syncs gets its data from the account). A
+ * backup file is read and described first, and replaces nothing until that's confirmed.
+ */
+function YourData() {
+  const data = useData();
+  const { projectUrl } = useSyncState();
+  const [backup, setBackup] = useState<Backup | null>(null); // read from a file, waiting to be confirmed
+  const [error, setError] = useState('');
+
+  const readFile = async (file: File | undefined) => {
+    setBackup(null);
+    setError('');
+    if (!file) return;
+    try {
+      setBackup(readBackup(await file.text()));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const restore = async () => {
+    if (backup && (await restoreBackup(backup))) setBackup(null);
+  };
+
+  const lost = backup ? entriesNotInBackup(data, backup) : 0;
+  return (
+    <>
+      <p className="small muted">
+        Everything is saved on this device first. <b>Export for analysis</b> gives one .zip of five spreadsheets (CSV)
+        that line up by date and id: daily, check-ins, episodes, entries and trackers. <b>Export backup</b> is
+        one file with everything{projectUrl ? '.' : <>, and <b>Restore backup</b> brings one back.</>}
+      </p>
+      <div className="button-row">
+        <button className="button primary" id="export-analysis" type="button" onClick={exportForAnalysis}>
+          Export for analysis
+        </button>
+        <button className="button" id="export-backup" type="button" onClick={exportBackup}>Export backup</button>
+        {/* The device's own file picker, invisible over the button, so a tap opens it. */}
+        {!projectUrl && (
+          <label className="button file-button">
+            Restore backup
+            <input type="file" id="restore-backup-file" accept=".json,application/json"
+              onChange={e => { readFile(e.target.files?.[0]); e.target.value = ''; }} />
+          </label>
+        )}
+      </div>
+      {error && <p className="small error-text" id="restore-backup-error">{error}</p>}
+      {backup && (
+        <div className="notice stack">
+          <p>
+            <b>Restore the backup{backup.exported ? ` from ${formatDate(backup.exported)}` : ''}?</b> It has{' '}
+            {backupContents(backup)}, and they replace everything on this device.
+            {lost === 1 && " 1 entry here isn't in the backup, so it will be lost."}
+            {lost > 1 && ` ${lost} entries here aren't in the backup, so they will be lost.`}
+          </p>
+          <div className="button-row">
+            <button type="button" className="button danger" id="restore-backup-confirm" onClick={restore}>
+              Replace with backup
+            </button>
+            <button type="button" className="button" onClick={() => setBackup(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      <p className="small muted">{dataStats(liveEntries(data).map(entryTime))}</p>
     </>
   );
 }

@@ -37,6 +37,10 @@ export function dayLabel(key: string): string {
   return new Date(dayStart(key)).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+/** A date with its year, in the person's own format, e.g. "Oct 10, 2026". */
+export const formatDate = (ms: number) =>
+  new Date(ms).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+
 /** The full date in American English, e.g. "Saturday, October 10". */
 export const longDate = (ms: number) =>
   new Date(ms).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });

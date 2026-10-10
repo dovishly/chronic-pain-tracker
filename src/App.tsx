@@ -7,7 +7,7 @@ import { SyncPill } from './components/SyncPill';
 import { StorageHelp } from './components/StorageHelp';
 import { Toast } from './components/Toast';
 import { TodayView } from './views/today/TodayView';
-import { CheckinView, emptyCheckin, type CheckinDraft } from './views/CheckinView';
+import { CheckinView, emptyCheckin, type CheckinDraft } from './views/checkin/CheckinView';
 import { SettingsView } from './views/settings/SettingsView';
 
 export function App() {

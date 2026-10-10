@@ -1,7 +1,11 @@
-import { dayKey, nowIso } from './util';
+// The files Log Lightly gives you, shared or downloaded: "Export for analysis" (CSVs in a .zip, built in
+// analysis.ts) and "Export backup" (one JSON file, see backup.ts). Each is only ever started by a tap, so each comes
+// wrapped in safely(), like the actions: a failure shows a toast.
+import { dayKey } from './util';
 import { dataStore } from './data';
-import { allTrackers, liveEntries } from './model';
-import { buildAnalysisTables, toCsv } from './analysis';
+import { buildAnalysisTables, type Cell, type Table } from './analysis';
+import { backupOf } from './backup';
+import { safely } from './toast';
 import { zip } from './zip';
 
 interface ExportFile {
@@ -34,27 +38,28 @@ async function shareOrDownload(file: ExportFile): Promise<void> {
 const today = () => dayKey(Date.now());
 
 /** The analysis CSVs in one .zip, in a folder named after today's date. */
-export function exportForAnalysis(): Promise<void> {
+export const exportForAnalysis = safely(() => {
   const folder = `log-lightly-${today()}`;
   const encoder = new TextEncoder();
   const files = buildAnalysisTables(dataStore.get())
     .map((table): [string, Uint8Array] => [`${folder}/${table.name}.csv`, encoder.encode(toCsv(table))]);
   return shareOrDownload({ name: `${folder}.zip`, data: zip(files), type: 'application/zip' });
+});
+
+/** Every tracker and entry in one JSON file. */
+export const exportBackup = safely(() => shareOrDownload({
+  name: `log-lightly-backup-${today()}.json`,
+  data: JSON.stringify(backupOf(dataStore.get()), null, 1),
+  type: 'application/json',
+}));
+
+/* ---------- CSV ---------- */
+
+function csvCell(value: Cell): string {
+  const text = value == null ? '' : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-/** Every tracker and entry in one JSON file. Deleted ones are left out: they hold nothing to keep. */
-export function exportBackup(): Promise<void> {
-  const data = dataStore.get();
-  const backup = {
-    app: 'logbook', // Log Lightly's former name, kept so every backup names the same format
-    version: 1,
-    exported: nowIso(),
-    trackers: allTrackers(data),
-    entries: liveEntries(data),
-  };
-  return shareOrDownload({
-    name: `log-lightly-backup-${today()}.json`,
-    data: JSON.stringify(backup, null, 1),
-    type: 'application/json',
-  });
+function toCsv(table: Table): string {
+  return [table.columns, ...table.rows].map(row => row.map(csvCell).join(',')).join('\n');
 }

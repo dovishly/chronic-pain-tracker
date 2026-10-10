@@ -1,13 +1,13 @@
 // Sync with the owner's Supabase project. This is the only code that talks to it.
 // Local changes wait in the outbox (outbox.ts) until they're uploaded; changes made on other devices are
 // pulled in after a cursor. A sync runs on start, every minute, on focus, when back online, and shortly
-// after each change (see main.tsx and store.ts).
+// after each change (see main.tsx and local.ts).
 import { createClient, type Session, type Subscription, type SupabaseClient } from '@supabase/supabase-js';
 import { createStore, prefs } from './util';
 import { db } from './db';
 import { clearMemory, dataStore, putInMemory } from './data';
 import { outbox } from './outbox';
-import { normalizeEntry, normalizeTracker, type Entry, type Table, type Tracker } from './model';
+import { normalizeEntry, normalizeTracker, type Entry, type TableName, type Tracker } from './model';
 
 export type SyncStatus = 'local' | 'signedout' | 'syncing' | 'offline' | 'ok' | 'error' | 'needsChoice' | 'needsSchema';
 
@@ -22,7 +22,7 @@ export interface SyncState {
   lastSync: number | null;
 }
 
-const TABLES: Table[] = ['trackers', 'entries']; // trackers first, so entries never point at a missing tracker
+const TABLES: TableName[] = ['trackers', 'entries']; // trackers first, so entries never point at a missing tracker
 
 interface Project { url: string; key: string } // project URL and anon/publishable key
 
@@ -192,7 +192,7 @@ async function flushOutbox(): Promise<void> {
   }
 }
 
-const cursorKey = (table: Table) => 'cursor:' + table;
+const cursorKey = (table: TableName) => 'cursor:' + table;
 
 /** Downloads rows changed since the last pull. */
 async function pullChanges(): Promise<void> {
@@ -214,7 +214,7 @@ async function pullChanges(): Promise<void> {
 }
 
 /** Keeps pulled rows, except ones this device already has or has a change of its own to. */
-async function takeIn(table: Table, rows: Record<string, unknown>[]): Promise<void> {
+async function takeIn(table: TableName, rows: Record<string, unknown>[]): Promise<void> {
   const inMemory: ReadonlyMap<string, Tracker | Entry> = dataStore.get()[table];
   const normalize = table === 'trackers' ? normalizeTracker : normalizeEntry;
   const fresh = rows

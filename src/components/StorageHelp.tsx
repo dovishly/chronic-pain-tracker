@@ -42,7 +42,8 @@ export function StorageHelp({ onOpenSettings }: { onOpenSettings: () => void }) 
                 for a week or so.
               </li>
               <li>
-                Every so often, tap <b>Settings → Export backup</b> and save the file to iCloud Drive.
+                Every so often, tap <b>Settings → Export backup</b> and save the file to iCloud Drive. If your entries
+                are ever lost, <b>Restore backup</b> brings them back from it.
               </li>
             </ul>
           </section>
