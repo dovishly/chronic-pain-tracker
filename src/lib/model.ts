@@ -96,23 +96,19 @@ export function defaultConfig(type: TrackerType): TrackerConfig {
 
 type StarterTracker = Pick<Tracker, 'name' | 'type' | 'group_name' | 'color' | 'config'>;
 
-/** Generic trackers created on a fresh device that isn't connected to an account. */
+/**
+ * Trackers created on a fresh device that isn't connected to an account: a generic place to start, to rename, change
+ * or add to. One of each kind, and each in its own color (there are eight of each).
+ */
 export const STARTER_TRACKERS: StarterTracker[] = [
-  { name: 'Mood', type: 'rating', group_name: 'Check-in', color: 'indigo', config: { levels: ['Awful', 'Bad', 'Okay', 'Good', 'Great'] } },
-  { name: 'Energy', type: 'rating', group_name: 'Check-in', color: 'amber', config: { levels: ['Very low', 'Low', 'Okay', 'Good', 'High'] } },
-  { name: 'Stress', type: 'rating', group_name: 'Check-in', color: 'rose', config: { levels: ['None', 'Low', 'Moderate', 'High', 'Overwhelmed'] } },
-  { name: 'Sleep quality', type: 'rating', group_name: 'Check-in', color: 'violet', config: { levels: ['Very poor', 'Poor', 'Okay', 'Good', 'Great'] } },
+  { name: 'Mood', type: 'rating', group_name: 'Check-in', color: 'amber', config: { levels: ['Awful', 'Bad', 'Okay', 'Good', 'Great'] } },
+  { name: 'Sleep', type: 'rating', group_name: 'Check-in', color: 'violet', config: { levels: ['Very poor', 'Poor', 'Okay', 'Good', 'Great'] } },
   { name: 'Water', type: 'number', group_name: 'Check-in', color: 'sky', config: { unit: 'glasses', min: 0, max: 30, step: 1 } },
-  { name: 'Activities', type: 'choice', group_name: 'Check-in', color: 'green', config: { options: ['Exercise', 'Work', 'Friends', 'Family', 'Outdoors', 'Reading', 'Rest'], multi: true } },
-  { name: 'Journal', type: 'text', group_name: 'Check-in', color: 'slate', config: {} },
-  { name: 'Tired', type: 'episode', group_name: 'Symptoms', color: 'indigo', config: { levels: [] } },
-  { name: 'Headache', type: 'episode', group_name: 'Symptoms', color: 'amber', config: { levels: ['Mild', 'Moderate', 'Severe'] } },
-  { name: 'Pain', type: 'episode', group_name: 'Symptoms', color: 'amber', config: { levels: ['Mild', 'Moderate', 'Severe'] } },
-  { name: 'Anxious', type: 'episode', group_name: 'Symptoms', color: 'teal', config: { levels: [] } },
-  { name: 'Low mood', type: 'episode', group_name: 'Symptoms', color: 'teal', config: { levels: [] } },
-  { name: 'Medication', type: 'moment', group_name: 'Moments', color: 'violet', config: {} },
-  { name: 'Coffee', type: 'moment', group_name: 'Moments', color: 'amber', config: {} },
-  { name: 'Meal', type: 'moment', group_name: 'Moments', color: 'green', config: {} },
+  { name: 'Activities', type: 'choice', group_name: 'Check-in', color: 'green', config: { options: ['Exercise', 'Work', 'Friends', 'Family', 'Outdoors', 'Rest'], multi: true } },
+  { name: 'Notes', type: 'text', group_name: 'Check-in', color: 'slate', config: {} },
+  { name: 'Pain', type: 'episode', group_name: 'Symptoms', color: 'rose', config: { levels: ['Mild', 'Moderate', 'Severe'] } },
+  { name: 'Fatigue', type: 'episode', group_name: 'Symptoms', color: 'indigo', config: { levels: [] } },
+  { name: 'Medication', type: 'moment', group_name: 'Moments', color: 'teal', config: {} },
 ];
 
 /* ---------- rows from IndexedDB or Supabase ---------- */

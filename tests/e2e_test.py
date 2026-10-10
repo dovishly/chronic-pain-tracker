@@ -36,7 +36,7 @@ OTHER_EMAIL = 'other@example.com'  # a second account there
 PASSWORD = 'correct horse battery staple'  # both accounts' password
 # The schema version the app needs; the fake database reports it once "schema.sql has been run".
 APP_SCHEMA_VERSION = int(re.search(r'const SCHEMA_VERSION = (\d+);', open(os.path.join(ROOT, 'src', 'lib', 'sync.ts')).read()).group(1))
-ACCOUNT_TRACKERS = 16      # the 15 starter trackers plus Stiffness, added on the first phone
+ACCOUNT_TRACKERS = 9       # the 8 starter trackers plus Stiffness, added on the first phone
 TRICKY_NAME = '<b>Bold</b> & "Q"'  # must be shown as typed, never turned into HTML
 
 
@@ -348,8 +348,9 @@ def phone1_export(phone1):
 
 def test_fresh_phone_has_the_starter_trackers(phone1):
     expect(phone1.locator('#sync-pill')).to_have_text('On this device only')
-    assert phone1.locator('[data-episode]').count() >= 5
-    expect(phone1.locator('[data-episode]', has_text='Headache')).to_have_count(1)
+    expect(phone1.locator('[data-episode]', has_text='Pain')).to_have_count(1)
+    expect(phone1.locator('[data-episode]', has_text='Fatigue')).to_have_count(1)
+    expect(phone1.locator('[data-moment]', has_text='Medication')).to_have_count(1)
 
 
 def test_help_explains_where_data_is_kept(phone1):
@@ -371,53 +372,53 @@ def test_help_explains_where_data_is_kept(phone1):
 
 
 def test_start_and_stop_episodes(phone1):
-    tired = phone1.locator('.episode-card.is-running', has_text='Tired')
-    phone1.locator('.episode-card .episode-button', has_text='Tired').click()
-    expect(tired).to_have_count(1)
-    expect(tired.locator('.level-buttons')).to_have_count(0)  # Tired has no levels
+    fatigue = phone1.locator('.episode-card.is-running', has_text='Fatigue')
+    phone1.locator('.episode-card .episode-button', has_text='Fatigue').click()
+    expect(fatigue).to_have_count(1)
+    expect(fatigue.locator('.level-buttons')).to_have_count(0)  # Fatigue has no levels
 
-    phone1.locator('.episode-card .episode-button', has_text='Headache').click()
-    headache = phone1.locator('.episode-card.is-running', has_text='Headache')
-    headache.locator('.level-buttons button[data-level="2"]').click()
-    expect(headache.locator('.level-buttons button[aria-pressed="true"]')).to_have_text('Moderate')
+    phone1.locator('.episode-card .episode-button', has_text='Pain').click()
+    pain = phone1.locator('.episode-card.is-running', has_text='Pain')
+    pain.locator('.level-buttons button[data-level="2"]').click()
+    expect(pain.locator('.level-buttons button[aria-pressed="true"]')).to_have_text('Moderate')
 
-    tired.locator('.episode-button').click()  # tapping a running episode's tile stops it
-    expect(tired).to_have_count(0)
+    fatigue.locator('.episode-button').click()  # tapping a running episode's tile stops it
+    expect(fatigue).to_have_count(0)
 
 
 def test_moments_and_the_days_log(phone1):
-    phone1.locator('.moment-button', has_text='Coffee').click()
-    expect(phone1.locator('.moment-button', has_text='Coffee')).to_have_attribute('aria-label', 'Coffee, 1 today')
+    phone1.locator('.moment-button', has_text='Medication').click()
+    expect(phone1.locator('.moment-button', has_text='Medication')).to_have_attribute('aria-label', 'Medication, 1 today')
     log = phone1.locator('#day-log')
-    expect(log).to_contain_text('Coffee')
-    expect(log).to_contain_text('Tired · until')  # one row for the whole episode
-    expect(log).to_contain_text('Headache: Moderate')
-    expect(phone1.locator('#day-log')).to_have_attribute('data-lanes', '2')  # Tired and Headache overlapped
+    expect(log).to_contain_text('Medication')
+    expect(log).to_contain_text('Fatigue · until')  # one row for the whole episode
+    expect(log).to_contain_text('Pain: Moderate')
+    expect(phone1.locator('#day-log')).to_have_attribute('data-lanes', '2')  # Fatigue and Pain overlapped
     expect(phone1.locator('#day-log > li').first).to_have_class('day-row day-now')
-    expect(phone1.locator('#day-log .lane-bar.is-now')).to_have_count(1)  # Headache, still going, reaches Now
-    expect(phone1.locator('#day-log .lane-bar.is-end, #day-log .lane-bar.is-start-end')).to_have_count(1)  # Tired's ring
+    expect(phone1.locator('#day-log .lane-bar.is-now')).to_have_count(1)  # Pain, still going, reaches Now
+    expect(phone1.locator('#day-log .lane-bar.is-end, #day-log .lane-bar.is-start-end')).to_have_count(1)  # Fatigue's ring
     shown_times = [t for t in phone1.locator('#day-log .entry-time').all_inner_texts() if t.strip()]
     assert len(shown_times) == len(set(shown_times))  # each time once, on the newest row that has it
-    expect(phone1.locator('.day-totals')).to_contain_text('Tired 1×')
-    expect(phone1.locator('.day-totals')).to_contain_text('Coffee 1×')
+    expect(phone1.locator('.day-totals')).to_contain_text('Fatigue 1×')
+    expect(phone1.locator('.day-totals')).to_contain_text('Medication 1×')
 
 
 def test_toast_undo(phone1):
     phone1.locator('.toast button', has_text='Undo').click()
-    expect(phone1.locator('#day-log')).not_to_contain_text('Coffee')
+    expect(phone1.locator('#day-log')).not_to_contain_text('Medication')
 
 
 def test_toast_moves_the_entry_earlier(phone1):
-    phone1.locator('.moment-button', has_text='Coffee').click()
+    phone1.locator('.moment-button', has_text='Medication').click()
     phone1.locator('.toast button', has_text='15').click()
     expect(phone1.locator('.toast')).to_contain_text('Moved to')
 
 
 def test_edit_an_entrys_note(phone1):
-    phone1.locator('.entry-row', has_text='Coffee').click()
-    phone1.locator('.entry-editor input[type=text]').fill('second cup')
+    phone1.locator('.entry-row', has_text='Medication').click()
+    phone1.locator('.entry-editor input[type=text]').fill('with food')
     phone1.locator('[data-save-entry]').click()
-    expect(phone1.locator('#day-log')).to_contain_text('second cup')
+    expect(phone1.locator('#day-log')).to_contain_text('with food')
     phone1.screenshot('today-light')
 
 
@@ -431,7 +432,7 @@ def test_check_in(phone1):
     phone1.locator('.chip', has_text='Exercise').click()
     phone1.locator('.chip', has_text='Friends').click()
     phone1.locator('.question', has_text='Water').locator('input').fill('3')
-    phone1.locator('.question', has_text='Journal').locator('textarea').fill('Felt okay after lunch')
+    phone1.locator('.question', has_text='Notes').locator('textarea').fill('Felt okay after lunch')
     phone1.screenshot('checkin-light')
 
     phone1.page.click('#save-checkin')  # saves and goes back to Today
@@ -440,7 +441,7 @@ def test_check_in(phone1):
     expect(checkin).to_contain_text('Check-in · Mood: Good, Water: 3 glasses +2 more')
     checkin.click()  # shows each answer
     log = phone1.locator('#day-log')
-    for text in ['Mood: Good', 'Activities: Exercise', 'Activities: Friends', 'Water: 3 glasses', 'Journal: Felt okay']:
+    for text in ['Mood: Good', 'Activities: Exercise', 'Activities: Friends', 'Water: 3 glasses', 'Notes: Felt okay']:
         expect(log).to_contain_text(text)
 
 
@@ -472,28 +473,28 @@ def test_custom_color(phone1):
 
 
 def test_rename_a_tracker_but_not_change_its_type(phone1):
-    phone1.locator('.tracker-list li', has_text='Tired').locator('[data-edit-tracker]').click()
-    expect(phone1.locator('#editor-type')).to_be_disabled()  # Tired has entries
+    phone1.locator('.tracker-list li', has_text='Fatigue').locator('[data-edit-tracker]').click()
+    expect(phone1.locator('#editor-type')).to_be_disabled()  # Fatigue has entries
     phone1.page.fill('#editor-name', 'Sleepy')
     phone1.page.click('#editor-save')
     expect(phone1.locator('#trackers')).to_contain_text('Sleepy')
 
 
 def test_archive_a_tracker(phone1):
-    phone1.locator('.tracker-list li', has_text='Meal').locator('[data-edit-tracker]').click()
+    phone1.locator('.tracker-list li', has_text='Water').locator('[data-edit-tracker]').click()
     phone1.page.click('#editor-archive')
-    expect(phone1.locator('#trackers')).not_to_contain_text('Meal')
-    expect(phone1.locator('#archived-trackers')).to_contain_text('Meal')
+    expect(phone1.locator('#trackers')).not_to_contain_text('Water')
+    expect(phone1.locator('#archived-trackers')).to_contain_text('Water')
 
 
 def test_move_a_tracker_up(phone1):
-    def low_mood_before_anxious():
+    def notes_before_activities():
         names = tracker_names(phone1)
-        return names.index('Low mood') < names.index('Anxious')
-    assert not low_mood_before_anxious()
-    phone1.locator('.tracker-list li', has_text='Low mood').locator('[data-move-up]').click()
-    phone1.wait_for(low_mood_before_anxious)
-    assert low_mood_before_anxious()
+        return names.index('Notes') < names.index('Activities')
+    assert not notes_before_activities()
+    phone1.locator('.tracker-list li', has_text='Notes').locator('[data-move-up]').click()
+    phone1.wait_for(notes_before_activities)
+    assert notes_before_activities()
 
 
 def test_rating_needs_two_to_ten_levels(phone1):
@@ -526,8 +527,8 @@ def test_exported_entries(phone1_export):
     assert any(row['tracker'] == 'Sleepy' and row['event'] == 'end' for row in entries)
     assert any(row['tracker'] == 'Mood' and row['event'] == 'answer' and row['value'] == '4' and row['label'] == 'Good'
                for row in entries)
-    assert any(row['note'] == 'second cup' for row in entries)
-    assert sum(row['tracker'] == 'Coffee' for row in entries) == 1  # the undone one is left out
+    assert any(row['note'] == 'with food' for row in entries)
+    assert sum(row['tracker'] == 'Medication' for row in entries) == 1  # the undone one is left out
 
 
 # ---------- phone 1: sync ----------
@@ -569,14 +570,14 @@ WIPED_ENTRY = {'deleted': True, 'value': None, 'text': None, 'note': None}
 
 
 def test_deleting_an_entry_wipes_it_here_and_in_supabase(phone1, supabase):
-    cup = next(row['id'] for row in supabase.rows('entries') if row['note'] == 'second cup')
+    dose = next(row['id'] for row in supabase.rows('entries') if row['note'] == 'with food')
     phone1.go_to('Today')
-    phone1.locator('.entry-row', has_text='second cup').click()
+    phone1.locator('.entry-row', has_text='with food').click()
     phone1.locator('.entry-editor .button.danger').click()
-    expect(phone1.locator('#day-log')).not_to_contain_text('second cup')
-    phone1.wait_for(lambda: fields(supabase.tables['entries'][cup], WIPED_ENTRY) == WIPED_ENTRY)
-    assert fields(supabase.tables['entries'][cup], WIPED_ENTRY) == WIPED_ENTRY
-    assert fields(phone1.stored('entries', cup), WIPED_ENTRY) == WIPED_ENTRY
+    expect(phone1.locator('#day-log')).not_to_contain_text('with food')
+    phone1.wait_for(lambda: fields(supabase.tables['entries'][dose], WIPED_ENTRY) == WIPED_ENTRY)
+    assert fields(supabase.tables['entries'][dose], WIPED_ENTRY) == WIPED_ENTRY
+    assert fields(phone1.stored('entries', dose), WIPED_ENTRY) == WIPED_ENTRY
 
 
 def test_backup_leaves_out_deleted_rows(phone1):
@@ -647,7 +648,7 @@ def test_fresh_phone_takes_the_accounts_trackers(phone2, supabase):
     expect(trackers).to_contain_text('Drowsy')
     expect(trackers).to_contain_text('Stiffness')
     # Its own starter trackers were replaced, not added to the account.
-    assert trackers.inner_text().count('Headache') == 1
+    assert trackers.inner_text().count('Pain') == 1
     assert len(supabase.rows('trackers')) == ACCOUNT_TRACKERS
     # The custom color picked on the first phone came along.
     stiffness_dot = phone2.locator('.tracker-list li', has_text='Stiffness').locator('.color-dot')
@@ -663,7 +664,7 @@ def test_fresh_phone_shows_the_accounts_entries(phone2):
 # ---------- phone 3: logs on its own first, then joins ----------
 
 def test_names_are_shown_as_typed_in_settings(phone3):
-    phone3.locator('.moment-button', has_text='Coffee').click()  # an entry of this phone's own, for later
+    phone3.locator('.moment-button', has_text='Medication').click()  # an entry of this phone's own, for later
     phone3.go_to('Settings')
     phone3.page.click('#add-tracker')
     phone3.page.fill('#editor-name', TRICKY_NAME)
@@ -726,17 +727,17 @@ def test_delete_a_tracker_everywhere(phone1, phone3, supabase):
 
 
 def test_delete_an_archived_tracker_takes_a_second_tap(phone3, supabase):
-    meal = next(row['id'] for row in supabase.rows('trackers') if row['name'] == 'Meal')
+    water = next(row['id'] for row in supabase.rows('trackers') if row['name'] == 'Water')
     phone3.page.evaluate("document.querySelector('#archived-trackers').open = true")
-    delete = phone3.locator('#archived-trackers li', has_text='Meal').locator('[data-delete-tracker]')
+    delete = phone3.locator('#archived-trackers li', has_text='Water').locator('[data-delete-tracker]')
     delete.click()
     expect(delete).to_have_text('Delete for good?')
     delete.click()
-    expect(phone3.locator('#archived-trackers')).to_have_count(0)  # Meal was the only archived tracker
+    expect(phone3.locator('#archived-trackers')).to_have_count(0)  # Water was the only archived tracker
     # Uploaded before the next test looks at what's in Supabase.
-    meal_deleted = lambda: supabase.tables['trackers'][meal]['deleted']
-    phone3.wait_for(meal_deleted)
-    assert meal_deleted()
+    water_deleted = lambda: supabase.tables['trackers'][water]['deleted']
+    phone3.wait_for(water_deleted)
+    assert water_deleted()
 
 
 def live_tracker_names(supabase):
@@ -751,7 +752,7 @@ def test_reset_this_phone_leaves_supabase_alone(phone2, supabase):
     phone2.page.click('#reset-device-confirm')
     expect(phone2.locator('#sync-pill')).to_have_text('On this device only')  # reopened, signed out
     phone2.go_to('Settings')
-    expect(phone2.locator('#trackers')).to_contain_text('Tired')  # the starter trackers again
+    expect(phone2.locator('#trackers')).to_contain_text('Fatigue')  # the starter trackers again
     expect(phone2.locator('#trackers')).not_to_contain_text('Stiffness')
     assert live_tracker_names(supabase) == in_supabase
 
@@ -771,7 +772,7 @@ def test_reset_everywhere(phone1, phone3, supabase):
     phone1.go_to('Settings')
     phone1.page.click('#sync-now')
     expect(phone1.locator('#trackers')).not_to_contain_text('Stiffness')
-    assert phone1.locator('#trackers').inner_text().count('Headache') == 1
+    assert phone1.locator('#trackers').inner_text().count('Pain') == 1
 
 
 def test_another_project_gets_its_schema_checked(phone1, supabase):
@@ -790,10 +791,10 @@ def test_another_project_gets_its_schema_checked(phone1, supabase):
 def test_pull_gets_past_more_rows_than_a_page_changed_at_once(phone1, supabase):
     # One update of many rows, like Reset everywhere's, gives them all the same updated_at. A page's worth
     # of them mustn't keep the pull from reaching the rows after them.
-    coffee = next(row for row in supabase.rows('trackers') if row['user_id'] == 'u1' and row['name'] == 'Coffee' and not row['deleted'])
+    medication = next(row for row in supabase.rows('trackers') if row['user_id'] == 'u1' and row['name'] == 'Medication' and not row['deleted'])
     updated_at = supabase.now()
     def row(id, deleted, note=None):
-        return {'id': id, 'user_id': 'u1', 'tracker_id': coffee['id'], 'kind': 'moment', 'value': None, 'text': None,
+        return {'id': id, 'user_id': 'u1', 'tracker_id': medication['id'], 'kind': 'moment', 'value': None, 'text': None,
                 'occurred_at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'note': note, 'checkin_id': None,
                 'deleted': deleted, 'updated_at': updated_at}
     for n in range(1000):
@@ -817,13 +818,13 @@ def test_an_account_with_only_deleted_trackers_counts_as_empty(browser, supabase
                                         'color': 'slate', 'config': {}, 'sort_order': 0, 'archived': False,
                                         'deleted': True, 'updated_at': supabase.now()}
     phone = Phone(browser, supabase)
-    phone.locator('.moment-button', has_text='Coffee').click()
+    phone.locator('.moment-button', has_text='Medication').click()
     phone.go_to('Settings')
     phone.connect()
     phone.sign_in(email=OTHER_EMAIL)
     expect(phone.locator('#sync-pill')).to_contain_text('Synced')
-    expect(phone.locator('#trackers')).to_contain_text('Coffee')
-    assert len([row for row in supabase.rows('entries') if row['user_id'] == 'u2']) == 1  # its coffee went up
+    expect(phone.locator('#trackers')).to_contain_text('Medication')
+    assert len([row for row in supabase.rows('entries') if row['user_id'] == 'u2']) == 1  # its medication went up
 
 
 def test_day_timeline_shows_gaps_and_overnight_episodes(browser, supabase):
