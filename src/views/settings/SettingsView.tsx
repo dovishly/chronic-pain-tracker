@@ -89,7 +89,7 @@ export function SettingsView() {
   );
 }
 
-const THEME_CHOICES: [ThemeChoice, string][] = [['phone', 'Match phone'], ['light', 'Light'], ['dark', 'Dark']];
+const THEME_CHOICES: [ThemeChoice, string][] = [['phone', 'Match device'], ['light', 'Light'], ['dark', 'Dark']];
 
 /** Light or dark, or whichever the phone is set to. Kept on this phone only. */
 function Appearance() {
@@ -104,7 +104,7 @@ function Appearance() {
           </button>
         ))}
       </div>
-      <p className="small muted">Match phone switches between light and dark with your phone.</p>
+      <p className="small muted">Match device switches between light and dark with your device.</p>
     </>
   );
 }
@@ -126,7 +126,7 @@ function StartOver() {
     <>
       <p className="small muted">Go back to the starter trackers, with no entries.</p>
       <div className="button-row">
-        <button type="button" className="button" id="reset-device" onClick={() => setConfirming('device')}>Reset this phone</button>
+        <button type="button" className="button" id="reset-device" onClick={() => setConfirming('device')}>Reset this device</button>
         {signedIn && (
           <button type="button" className="button danger" id="reset-everywhere" onClick={() => setConfirming('everywhere')}>
             Reset everywhere
@@ -136,14 +136,14 @@ function StartOver() {
       {confirming === 'device' && (
         <div className="notice stack">
           <p>
-            <b>Reset this phone?</b> Everything on it is erased, including your Supabase sign-in, and Log Lightly starts
+            <b>Reset this device?</b> Everything on it is erased, including your Supabase sign-in, and Log Lightly starts
             again with the starter trackers.{' '}
             {signedIn
               ? "Your synced data stays in Supabase: connect and sign in again to get it back. Anything that hasn't synced yet is lost."
               : "There's no other copy, so export a backup first if you might want it."}
           </p>
           <div className="button-row">
-            <button type="button" className="button danger" id="reset-device-confirm" onClick={resetDevice}>Erase this phone</button>
+            <button type="button" className="button danger" id="reset-device-confirm" onClick={resetDevice}>Erase this device</button>
             {cancel}
           </div>
         </div>
@@ -151,7 +151,7 @@ function StartOver() {
       {confirming === 'everywhere' && (
         <div className="notice stack">
           <p>
-            <b>Reset everywhere?</b> Every tracker and entry is deleted, here, in Supabase, and on your other phones
+            <b>Reset everywhere?</b> Every tracker and entry is deleted, here, in Supabase, and on your other devices
             when they next sync. Log Lightly starts again with the starter trackers. This can't be undone, so export a
             backup first if you might want it.
           </p>

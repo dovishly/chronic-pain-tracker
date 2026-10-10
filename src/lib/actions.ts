@@ -270,6 +270,6 @@ export const resetEverywhere = safely(async () => {
   await saveTrackers([...trackers.values()].filter(t => !t.deleted).map(deletedTracker));
   await saveEntries([...entries.values()].filter(e => !e.deleted).map(deletedEntry));
   await addStarterTrackers();
-  toast('Everything was reset. Your other phones catch up when they next sync.');
+  toast('Everything was reset. Your other devices catch up when they next sync.');
   return true;
 });

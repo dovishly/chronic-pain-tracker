@@ -356,7 +356,7 @@ def test_help_explains_where_data_is_kept(phone1):
     help_dialog = phone1.locator('#storage-help-dialog')
     phone1.page.click('#storage-help')
     expect(help_dialog).to_be_visible()
-    expect(help_dialog).to_contain_text("At the moment, it's only on this phone")
+    expect(help_dialog).to_contain_text("At the moment, it's only on this device")
     expect(help_dialog).to_contain_text('Free projects are paused after about a week')
     expect(phone1.locator('#storage-help-title')).to_be_focused()  # so it opens at the top, not at the buttons
     phone1.screenshot('help-light')
@@ -747,7 +747,7 @@ def test_reset_this_phone_leaves_supabase_alone(phone2, supabase):
     in_supabase = live_tracker_names(supabase)
     phone2.go_to('Settings')
     phone2.page.click('#reset-device')
-    expect(phone2.locator('.notice', has_text='Reset this phone?')).to_contain_text('Your synced data stays in Supabase')
+    expect(phone2.locator('.notice', has_text='Reset this device?')).to_contain_text('Your synced data stays in Supabase')
     phone2.page.click('#reset-device-confirm')
     expect(phone2.locator('#sync-pill')).to_have_text('On this device only')  # reopened, signed out
     phone2.go_to('Settings')
@@ -964,7 +964,7 @@ def test_appearance_is_picked_in_settings_and_kept(browser, supabase):
     expect(html).to_have_attribute('data-theme', 'dark')
     phone.go_to('Settings')
     expect(phone.locator('#theme-choice button[aria-pressed="true"]')).to_have_text('Dark')
-    phone.locator('#theme-choice button', has_text='Match phone').click()
+    phone.locator('#theme-choice button', has_text='Match device').click()
     expect(html).to_have_attribute('data-theme', 'light')
     assert background() == 'rgb(232, 236, 230)'
 

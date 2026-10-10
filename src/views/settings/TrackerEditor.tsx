@@ -187,7 +187,7 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
           <p>
             <b>Delete {tracker.name} for good?</b>{' '}
             {entryCount > 0 && `Its ${entryCount} ${entryCount === 1 ? 'entry goes' : 'entries go'} with it, `}
-            {entryCount > 0 ? 'on' : 'On'} this phone and everywhere you're signed in. This can't be undone.
+            {entryCount > 0 ? 'on' : 'On'} this device and everywhere you're signed in. This can't be undone.
             To hide it but keep its history, archive it instead.
           </p>
           <div className="button-row">
