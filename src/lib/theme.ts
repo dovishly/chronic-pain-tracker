@@ -6,7 +6,7 @@ import { createStore, prefs } from './util';
 export type ThemeChoice = 'phone' | 'light' | 'dark';
 
 /** The browser bar's color in each theme: the page background, --bg in styles.css. */
-const BAR_COLORS = { light: '#E8ECE6', dark: '#121814' };
+const BAR_COLORS = { light: '#E8ECE6', dark: '#1B1C1E' };
 
 const phoneIsDark = matchMedia('(prefers-color-scheme: dark)');
 const stored = prefs.get<string>('theme');

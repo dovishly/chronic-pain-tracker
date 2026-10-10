@@ -957,8 +957,8 @@ def test_appearance_is_picked_in_settings_and_kept(browser, supabase):
     phone.go_to('Settings')
     phone.locator('#theme-choice button', has_text='Dark').click()
     expect(html).to_have_attribute('data-theme', 'dark')
-    assert background() == 'rgb(18, 24, 20)'
-    assert phone.locator('meta[name="theme-color"]').first.get_attribute('content') == '#121814'
+    assert background() == 'rgb(27, 28, 30)'
+    assert phone.locator('meta[name="theme-color"]').first.get_attribute('content') == '#1B1C1E'
 
     phone.open()  # kept when the app is opened again, from the first paint
     expect(html).to_have_attribute('data-theme', 'dark')

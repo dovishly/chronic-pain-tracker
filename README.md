@@ -37,6 +37,7 @@ Your tracker names and entries are stored on your device and in your own Supabas
 ### Create the project
 1. Go to [supabase.com](https://supabase.com), sign up, and click **New project**.
 2. Give it a name and password.
+3. Under **Security**, keep **Enable Data API** ticked: the app syncs through it. Leave **Automatically expose new tables** and **Enable automatic RLS** unticked. The setup SQL gives the app access to its own two tables and turns on their row security itself.
 
 ### Lock sign-ups and add yourself
 1. Open **Authentication → Users**. Click **Add user → Create new user**, enter your email and a strong password, and tick **Auto Confirm User**. This will be how you sign in to the app.
