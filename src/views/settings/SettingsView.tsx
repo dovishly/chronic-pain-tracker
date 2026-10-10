@@ -18,15 +18,24 @@ export interface NewTrackerRequest {
   group: string;
 }
 
-/** A blank tracker, in the color the fewest trackers in use have, so they stay easy to tell apart. */
+/** A blank tracker, in a color that keeps it easy to tell apart from the others (see freshColor). */
 const newTracker = (data: Data, { type, group }: NewTrackerRequest = { type: 'episode', group: '' }): Tracker => ({
-  id: uuid(), name: '', type, group_name: group, color: leastUsedColor(data),
+  id: uuid(), name: '', type, group_name: group, color: freshColor(data, group),
   config: defaultConfig(type), sort_order: 0, archived: false, deleted: false,
 });
 
-function leastUsedColor(data: Data): string {
-  const uses = (color: string) => activeTrackers(data).filter(t => t.color === color).length;
-  return COLORS.reduce((best, color) => (uses(color) < uses(best) ? color : best));
+/** The color fewest trackers under this heading have (they sit side by side), then fewest of all trackers. */
+function freshColor(data: Data, group: string): string {
+  const trackers = activeTrackers(data);
+  const uses = (color: string) => [
+    trackers.filter(t => t.color === color && (t.group_name || '') === group).length,
+    trackers.filter(t => t.color === color).length,
+  ];
+  const fewer = (a: string, b: string) => {
+    const [[groupA, allA], [groupB, allB]] = [uses(a), uses(b)];
+    return groupA < groupB || (groupA === groupB && allA < allB);
+  };
+  return COLORS.reduce((best, color) => (fewer(color, best) ? color : best));
 }
 
 interface Props {

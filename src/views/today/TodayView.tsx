@@ -22,71 +22,73 @@ export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
   const data = useData();
   const now = useNow(CLOCK_REFRESH_MS);
   const running = runningEpisodes(data);
-  const episodeGroups = groupTrackers(activeTrackers(data, 'episode'));
-  const moments = activeTrackers(data, 'moment');
+  // Under the headings the person gave them, start/stop tiles first and one-tap buttons after.
+  const groups = groupTrackers(activeTrackers(data, 'episode', 'moment'));
   const momentsToday = countMomentsToday(data, now);
 
   return (
     <section id="view-today" className="stack spacious">
-      <div className="stack spacious">
-        {episodeGroups.length ? (
-          episodeGroups.map(([group, trackers]) => (
+      {groups.length ? (
+        groups.map(([group, trackers]) => {
+          const episodes = trackers.filter(t => t.type === 'episode');
+          const moments = trackers.filter(t => t.type === 'moment');
+          return (
             <section key={group}>
               <div className="row-between section-header">
                 <h2>{group}</h2>
-                <AddLink label={`Add a start/stop tracker to ${group}`}
-                  onClick={() => onAddTracker({ type: 'episode', group })} />
+                {/* A new one of the kind the section already has, start/stop first. */}
+                <AddLink label={`Add to ${group}`}
+                  onClick={() => onAddTracker({ type: episodes.length ? 'episode' : 'moment', group })} />
               </div>
-              <div className="episode-grid">
-                {trackers.map(tracker => (
-                  <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} />
-                ))}
+              <div className="today-group">
+                {episodes.length > 0 && (
+                  <div className="episode-grid">
+                    {episodes.map(tracker => (
+                      <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} />
+                    ))}
+                  </div>
+                )}
+                {moments.length > 0 && (
+                  <div className="moment-buttons">
+                    {moments.map(tracker => (
+                      <MomentButton key={tracker.id} tracker={tracker} count={momentsToday.get(tracker.id) ?? 0} />
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
-          ))
-        ) : (
-          <section>
-            <div className="row-between section-header">
-              <h2>Symptoms</h2>
-              <AddLink label="Add a start/stop tracker" onClick={() => onAddTracker({ type: 'episode', group: 'Symptoms' })} />
-            </div>
-            <p className="empty-note">Nothing to start and stop yet. Add something that comes and goes, like pain.</p>
-          </section>
-        )}
-      </div>
-
-      <section aria-labelledby="moments-heading">
-        <div className="row-between section-header">
-          <h2 id="moments-heading">Moments</h2>
-          <AddLink label="Add a moment" onClick={() => onAddTracker({ type: 'moment', group: 'Moments' })} />
-        </div>
-        {moments.length > 0 ? (
-          <div className="moment-buttons" id="moments">
-            {moments.map(tracker => {
-              const count = momentsToday.get(tracker.id) ?? 0;
-              return (
-                <button
-                  key={tracker.id}
-                  type="button"
-                  className="moment-button"
-                  style={colorStyle(tracker.color)}
-                  data-moment={tracker.id}
-                  aria-label={count ? `${tracker.name}, ${count} today` : undefined}
-                  onClick={() => logMoment(tracker.id)}
-                >
-                  {tracker.name}
-                  {count > 0 && <span className="moment-count mono">×{count}</span>}
-                </button>
-              );
-            })}
+          );
+        })
+      ) : (
+        <section>
+          <div className="row-between section-header">
+            <h2>Symptoms</h2>
+            <AddLink label="Add to Symptoms" onClick={() => onAddTracker({ type: 'episode', group: 'Symptoms' })} />
           </div>
-        ) : (
-          <p className="empty-note">Nothing to log with one tap yet, like a dose of medication.</p>
-        )}
-      </section>
+          <p className="empty-note">Nothing to tap yet. Add something that comes and goes, like pain, or happens at a moment, like a dose of medication.</p>
+        </section>
+      )}
 
       <DaySection shownDay={shownDay} onShowDay={onShowDay} />
     </section>
+  );
+}
+
+/** A one-tap button: a pill with a "+", and how many times it's been logged today. */
+function MomentButton({ tracker, count }: { tracker: Tracker; count: number }) {
+  return (
+    <button
+      type="button"
+      className="moment-button"
+      style={colorStyle(tracker.color)}
+      data-moment={tracker.id}
+      aria-label={count ? `${tracker.name}, ${count} today` : undefined}
+      onClick={() => logMoment(tracker.id)}
+    >
+      <span className="moment-plus" aria-hidden="true">+</span>
+      {tracker.name}
+      {count > 0 && <span className="moment-count mono">×{count}</span>}
+    </button>
   );
 }
 
@@ -119,13 +121,10 @@ function EpisodeCard({ tracker, episode, now }: { tracker: Tracker; episode?: Ru
         aria-pressed={!!episode}
         onClick={() => toggleEpisode(tracker.id)}
       >
+        {/* Laid out the same at rest and running (see .episode-button), so nothing moves when it's tapped. */}
         <span className="episode-name">{tracker.name}</span>
-        {episode && (
-          <span className="episode-duration">
-            <RunningIcon />
-            {formatDuration(now - episode.since)}
-          </span>
-        )}
+        {episode && <span className="episode-time">{formatDuration(now - episode.since)}</span>}
+        <span className="episode-icon"><StateIcon running={!!episode} /></span>
       </button>
       {hasLevels && (
         <div className="level-buttons" role="group"
@@ -145,12 +144,15 @@ function EpisodeCard({ tracker, episode, now }: { tracker: Tracker; episode?: Ru
   );
 }
 
-/** A dot in a ring, beside a running episode's time. */
-function RunningIcon() {
+/**
+ * What a start/stop tile is doing: an empty ring at rest, filled in with a dot while running. It
+ * tells a start/stop tile from a one-tap button, which has a "+" instead.
+ */
+function StateIcon({ running }: { running: boolean }) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
       <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <circle cx="7" cy="7" r="3" fill="currentColor" />
+      {running && <circle cx="7" cy="7" r="3" fill="currentColor" />}
     </svg>
   );
 }

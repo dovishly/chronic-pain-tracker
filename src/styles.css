@@ -538,6 +538,13 @@ textarea {
   margin-right: -4px;
 }
 
+/* A section on Today: its start/stop tiles, then its one-tap buttons. */
+.today-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* ===================== Today: start/stop tiles ===================== */
 
 /* Dense, so the half-width tiles fill in around the full-row ones with levels, rather than leave holes. Nothing
@@ -549,10 +556,11 @@ textarea {
   gap: 10px;
 }
 
-/* At rest: flat, outlined in the tracker's color. */
+/* At rest: flat, outlined in the tracker's color. The outline is as thick at rest as running, so a tile is the
+   same size either way: running shows in the fill, the outline's color and the edge below. */
 .episode-card {
   background: var(--surface);
-  border: 1.5px solid var(--rest-line);
+  border: 2px solid var(--rest-line);
   border-radius: 18px;
   color: var(--deep);
   display: flex;
@@ -563,59 +571,79 @@ textarea {
 /* Running: filled in, with a heavier outline and an edge below, so it reads as pressed even without color. */
 .episode-card.is-running {
   background: var(--tint);
-  border: 2px solid var(--run-line);
+  border-color: var(--run-line);
   box-shadow: 0 3px 0 var(--run-edge);
   color: var(--ink);
 }
 
-/* With levels: always the whole row, name (and time, while running) on one line, the levels underneath. */
+/* With levels: always the whole row, name and time on one line, the levels underneath. */
 .episode-card.has-levels {
   grid-column: 1 / -1;
   padding: 4px 8px 8px;
   gap: 4px;
 }
 
+/* Fixed places, the same at rest and running, so nothing moves when it's tapped: the name top left, the ring top
+   right, and room under the name for the time while it runs. */
 .episode-button {
   border: 0;
   background: none;
   color: inherit;
   text-align: left;
-  padding: 14px 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 66px;
+  padding: 12px 13px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-content: start;
+  column-gap: 8px;
+  row-gap: 2px;
+  min-height: 74px;
   border-radius: inherit;
 }
 
-.episode-card.is-running .episode-button {
-  padding: 10px 13px;
-}
-
+/* With levels: one line, the time just left of the ring. */
 .episode-card.has-levels .episode-button {
-  flex-direction: row;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-rows: auto;
+  align-content: center;
   align-items: center;
-  gap: 12px;
   min-height: 40px;
   padding: 0 6px;
 }
 
 .episode-name {
+  grid-column: 1;
+  grid-row: 1;
   font-weight: 700;
   font-size: 1.05rem;
-  min-width: 0;
   overflow-wrap: anywhere;
 }
 
-/* How long it's been going, after a dot in a ring. */
-.episode-duration {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.episode-time {
+  grid-column: 1;
+  grid-row: 2;
   font-size: .95rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.episode-card.has-levels .episode-time {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+/* The ring: empty at rest, a dot in it while running. */
+.episode-icon {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  height: 1.47rem; /* the name's line height, so the ring sits level with it */
+}
+
+.episode-card.has-levels .episode-icon {
+  grid-column: 3;
+  height: auto;
 }
 
 .color-dot {
@@ -671,12 +699,13 @@ textarea {
   gap: 10px;
 }
 
+/* A pill, not a tile, with a "+" before the name: one tap adds one, nothing to stop. */
 .moment-button {
   border: 1.5px solid var(--rest-line);
   background: var(--surface);
   color: var(--deep);
-  border-radius: 16px;
-  padding: 11px 15px;
+  border-radius: 999px;
+  padding: 11px 18px 11px 14px;
   min-height: 48px;
   font-weight: 700;
   display: inline-flex;
@@ -686,6 +715,12 @@ textarea {
 
 .moment-button:active {
   background: var(--tint);
+}
+
+.moment-plus {
+  font-size: 1.15rem;
+  line-height: 1;
+  margin-right: -2px;
 }
 
 /* How many times today, e.g. "×2". */

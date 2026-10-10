@@ -685,9 +685,9 @@ def test_restore_an_archived_tracker(phone3):
 def test_names_are_shown_as_typed_on_today(phone3):
     phone3.go_to('Today')
     phone3.locator('.moment-button', has_text='Bold').click()
-    expect(phone3.locator('#moments')).to_contain_text(TRICKY_NAME)
+    expect(phone3.locator('.moment-button', has_text=TRICKY_NAME)).to_have_count(1)
     expect(phone3.locator('#day-log')).to_contain_text(TRICKY_NAME)
-    assert phone3.locator('#moments b, #day-log b, #toast-host b').count() == 0
+    assert phone3.locator('#view-today b, #toast-host b').count() == 0
 
 
 def test_joining_asks_before_replacing_this_phones_data(phone3, supabase):
@@ -972,7 +972,7 @@ def test_appearance_is_picked_in_settings_and_kept(browser, supabase):
 
 def test_add_from_a_section_and_come_back(browser, supabase):
     phone = Phone(browser, supabase)
-    add_moment = phone.locator('.add-link[aria-label="Add a moment"]')
+    add_moment = phone.locator('.add-link[aria-label="Add to Moments"]')
     add_moment.click()
     expect(phone.locator('h1')).to_have_text('Settings')
     expect(phone.locator('#editor-type')).to_have_value('moment')  # that section's kind and heading, filled in
@@ -984,7 +984,15 @@ def test_add_from_a_section_and_come_back(browser, supabase):
     phone.page.fill('#editor-name', 'Snack')
     phone.page.click('#editor-save')
     expect(phone.locator('h1')).to_have_text('Today')
-    expect(phone.locator('#moments')).to_contain_text('Snack')
+    expect(phone.locator('.moment-button', has_text='Snack')).to_have_count(1)
+
+    # Added under Symptoms and made a one-tap moment: it stays under Symptoms, where it was added.
+    phone.locator('.add-link[aria-label="Add to Symptoms"]').click()
+    phone.page.fill('#editor-name', 'Dizzy spell')
+    phone.page.select_option('#editor-type', 'moment')
+    phone.page.click('#editor-save')
+    symptoms = phone.locator('#view-today > section', has=phone.locator('h2', has_text='Symptoms'))
+    expect(symptoms.locator('.moment-button', has_text='Dizzy spell')).to_have_count(1)
 
     phone.go_to('Check in')
     phone.locator('.add-link', has_text='Add').first.click()

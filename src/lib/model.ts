@@ -71,8 +71,8 @@ export const TYPE_LABELS: Record<TrackerType, string> = {
 
 export const TYPE_HELP: Record<TrackerType, string> = {
   rating: 'A scale you answer in a check-in, with your own wording for each level.',
-  episode: 'A button you tap when something starts and again when it stops. Shown on Today.',
-  moment: 'A one-tap button for something that happens at a moment. Shown on Today.',
+  episode: 'A button you tap when something starts and again when it stops. Shown on Today, under its group.',
+  moment: 'A one-tap button for something that happens at a moment. Shown on Today, under its group.',
   number: 'A number you enter in a check-in, like minutes or glasses.',
   choice: 'Options to pick from in a check-in, like activities.',
   text: 'Free text in a check-in.',
