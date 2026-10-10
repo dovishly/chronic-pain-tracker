@@ -1,8 +1,11 @@
 import { useNow, useData } from '../../hooks';
-import { formatDayTime, formatDuration } from '../../lib/util';
-import { activeTrackers, groupTrackers, runningEpisodes, type RunningEpisode, type Tracker } from '../../lib/model';
-import { logLevel, logMoment, toggleEpisode } from '../../lib/actions';
+import { dayKey, dayStart, formatDuration } from '../../lib/util';
+import {
+  activeTrackers, entryTime, groupTrackers, liveEntries, runningEpisodes, type Data, type RunningEpisode, type Tracker,
+} from '../../lib/model';
+import { logLevel, logMoment, startAtLevel, toggleEpisode } from '../../lib/actions';
 import { colorStyle } from '../../components/color';
+import { CheckIcon } from '../../components/icons';
 import { DaySection } from './DaySection';
 
 const CLOCK_REFRESH_MS = 30_000; // keeps running durations current
@@ -18,22 +21,10 @@ export function TodayView({ shownDay, onShowDay }: Props) {
   const running = runningEpisodes(data);
   const episodeGroups = groupTrackers(activeTrackers(data, 'episode'));
   const moments = activeTrackers(data, 'moment');
+  const momentsToday = countMomentsToday(data, now);
 
   return (
     <section id="view-today" className="stack spacious">
-      <section aria-labelledby="running-heading">
-        <h2 id="running-heading">On now</h2>
-        <div className="running-list" id="running">
-          {running.size ? (
-            [...running].map(([trackerId, episode]) => (
-              <RunningPill key={trackerId} tracker={data.trackers.get(trackerId)!} episode={episode} now={now} />
-            ))
-          ) : (
-            <span className="empty-note">Nothing running. Tap a button below when something starts, and again when it stops.</span>
-          )}
-        </div>
-      </section>
-
       <div className="stack spacious">
         {episodeGroups.length ? (
           episodeGroups.map(([group, trackers]) => (
@@ -55,18 +46,23 @@ export function TodayView({ shownDay, onShowDay }: Props) {
         <section aria-labelledby="moments-heading">
           <h2 id="moments-heading">Moments</h2>
           <div className="moment-buttons" id="moments">
-            {moments.map(tracker => (
-              <button
-                key={tracker.id}
-                type="button"
-                className="moment-button"
-                style={colorStyle(tracker.color)}
-                data-moment={tracker.id}
-                onClick={() => logMoment(tracker.id)}
-              >
-                {tracker.name}
-              </button>
-            ))}
+            {moments.map(tracker => {
+              const count = momentsToday.get(tracker.id) ?? 0;
+              return (
+                <button
+                  key={tracker.id}
+                  type="button"
+                  className="moment-button"
+                  style={colorStyle(tracker.color)}
+                  data-moment={tracker.id}
+                  aria-label={count ? `${tracker.name}, ${count} today` : undefined}
+                  onClick={() => logMoment(tracker.id)}
+                >
+                  {tracker.name}
+                  {count > 0 && <span className="moment-count mono">×{count}</span>}
+                </button>
+              );
+            })}
           </div>
         </section>
       )}
@@ -76,33 +72,28 @@ export function TodayView({ shownDay, onShowDay }: Props) {
   );
 }
 
-/** A running episode at the top of Today. Tapping it ends the episode. */
-function RunningPill({ tracker, episode, now }: { tracker: Tracker; episode: RunningEpisode; now: number }) {
-  return (
-    <button
-      type="button"
-      className="running-pill"
-      style={colorStyle(tracker.color)}
-      data-episode={tracker.id}
-      aria-label={`End ${tracker.name}, running since ${formatDayTime(episode.since)}`}
-      onClick={() => toggleEpisode(tracker.id)}
-    >
-      {tracker.name}
-      {episode.label ? ` · ${episode.label}` : ''}
-      <span className="mono">{formatDuration(now - episode.since)}</span>
-    </button>
-  );
+/** How many times each moment tracker has been logged since midnight, by tracker id. */
+function countMomentsToday(data: Data, now: number): Map<string, number> {
+  const since = dayStart(dayKey(now));
+  const counts = new Map<string, number>();
+  for (const entry of liveEntries(data)) {
+    if (entry.kind === 'moment' && entryTime(entry) >= since) counts.set(entry.tracker_id, (counts.get(entry.tracker_id) ?? 0) + 1);
+  }
+  return counts;
 }
 
-/** A start/stop button. While running, it shows how long, plus severity buttons if the tracker has levels. */
+/**
+ * A start/stop button. At rest it's outlined; while running it's filled in, with how long it's been going. One with
+ * levels always takes a whole row, its levels underneath: tapping one sets it, or starts it at that level.
+ */
 function EpisodeCard({ tracker, episode, now }: { tracker: Tracker; episode?: RunningEpisode; now: number }) {
   const levels = (tracker.config.levels || []).filter(Boolean);
-  const status = episode
-    ? `Since ${formatDayTime(episode.since)} · ${formatDuration(now - episode.since)} · tap to end`
-    : 'Tap when it starts';
+  const hasLevels = levels.length > 0;
+  const className = ['episode-card', episode && 'is-running', hasLevels && 'has-levels'].filter(Boolean).join(' ');
+  const pickLevel = (level: number) => (episode ? logLevel(tracker.id, level) : startAtLevel(tracker.id, level));
 
   return (
-    <div className={episode ? 'episode-card is-running' : 'episode-card'} style={colorStyle(tracker.color)}>
+    <div className={className} style={colorStyle(tracker.color)}>
       <button
         type="button"
         className="episode-button"
@@ -110,29 +101,38 @@ function EpisodeCard({ tracker, episode, now }: { tracker: Tracker; episode?: Ru
         aria-pressed={!!episode}
         onClick={() => toggleEpisode(tracker.id)}
       >
-        <span className="episode-name">
-          <span className="color-dot" />
-          <span>{tracker.name}</span>
-        </span>
-        <span className="episode-status">{status}</span>
+        <span className="episode-name">{tracker.name}</span>
+        {episode && (
+          <span className="episode-duration">
+            <RunningIcon />
+            {formatDuration(now - episode.since)}
+          </span>
+        )}
       </button>
-      {episode && levels.length > 0 && (
-        <div className="level-buttons" role="group" aria-label={`${tracker.name} level`}>
-          {levels.map((label, i) => (
-            <button
-              key={i}
-              type="button"
-              data-level={i + 1}
-              aria-label={label}
-              title={label}
-              aria-pressed={episode.level === i + 1}
-              onClick={() => logLevel(tracker.id, i + 1)}
-            >
-              {i + 1}
-            </button>
-          ))}
+      {hasLevels && (
+        <div className="level-buttons" role="group"
+          aria-label={episode ? `${tracker.name} level` : `Start ${tracker.name} at a level`}>
+          {levels.map((label, i) => {
+            const picked = episode?.level === i + 1;
+            return (
+              <button key={i} type="button" data-level={i + 1} aria-pressed={picked} onClick={() => pickLevel(i + 1)}>
+                {picked && <CheckIcon />}
+                {label}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
+  );
+}
+
+/** A dot in a ring, beside a running episode's time. */
+function RunningIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="7" cy="7" r="3" fill="currentColor" />
+    </svg>
   );
 }

@@ -28,6 +28,10 @@ export function dayLabel(key: string): string {
   return new Date(dayStart(key)).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+/** The full date in American English, e.g. "Saturday, October 10". */
+export const longDate = (ms: number) =>
+  new Date(ms).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
 /** "HH:MM", 24-hour, as used by <input type="time"> and the CSV export. */
 export function clockTime(ms: number): string {
   const d = new Date(ms);

@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { useData, useSyncState } from '../../hooks';
+import { useData, useSyncState, useTheme } from '../../hooks';
+import { setTheme, type ThemeChoice } from '../../lib/theme';
+import { CheckIcon } from '../../components/icons';
 import { dayKey, dayLabel, uuid } from '../../lib/util';
 import { defaultConfig, entryTime, liveEntries, type Tracker } from '../../lib/model';
 import { exportBackup, exportForAnalysis } from '../../lib/export';
@@ -45,6 +47,13 @@ export function SettingsView() {
         <ArchivedTrackers />
       </section>
 
+      <section aria-labelledby="appearance-heading">
+        <h2 id="appearance-heading">Appearance</h2>
+        <div className="panel stack">
+          <Appearance />
+        </div>
+      </section>
+
       <section>
         <h2>Sync</h2>
         <div className="panel stack" id="sync-panel">
@@ -77,6 +86,26 @@ export function SettingsView() {
         </div>
       </section>
     </section>
+  );
+}
+
+const THEME_CHOICES: [ThemeChoice, string][] = [['phone', 'Match phone'], ['light', 'Light'], ['dark', 'Dark']];
+
+/** Light or dark, or whichever the phone is set to. Kept on this phone only. */
+function Appearance() {
+  const theme = useTheme();
+  return (
+    <>
+      <div className="segmented" id="theme-choice" role="group" aria-labelledby="appearance-heading">
+        {THEME_CHOICES.map(([choice, label]) => (
+          <button key={choice} type="button" aria-pressed={theme === choice} onClick={() => setTheme(choice)}>
+            <CheckIcon />
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="small muted">Match phone switches between light and dark with your phone.</p>
+    </>
   );
 }
 

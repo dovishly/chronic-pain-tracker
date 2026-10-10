@@ -41,6 +41,22 @@ export const logLevel = safely(async (trackerId: string, level: number) => {
   toast(`${tracker.name}: ${label}`, entry.id);
 });
 
+/** Starts an episode at a level (1-based), in one tap: a start and a level at the same moment. */
+export const startAtLevel = safely(async (trackerId: string, level: number) => {
+  const tracker = trackerById(trackerId);
+  const label = levelLabel(tracker, level) ?? String(level);
+  const start = newEntry(trackerId, 'start');
+  await saveEntries([start, newEntry(trackerId, 'level', { value: level, text: label, occurred_at: start.occurred_at })]);
+  toast(`${tracker.name} started ${formatTime(entryTime(start))} · ${label}`, start.id);
+});
+
+/** Levels logged at the very moment a start was (by startAtLevel): they go with it when it's moved or undone. */
+function levelsAtStart(start: Entry): Entry[] {
+  if (start.kind !== 'start') return [];
+  return [...data().entries.values()].filter(e =>
+    e.kind === 'level' && !e.deleted && e.tracker_id === start.tracker_id && e.occurred_at === start.occurred_at);
+}
+
 export const logMoment = safely(async (trackerId: string) => {
   const tracker = trackerById(trackerId);
   const entry = await addEntry(trackerId, 'moment');
@@ -93,7 +109,7 @@ export const moveEntryEarlier = safely(async (id: string, minutes: number) => {
     toast(overlapMessage(entry.tracker_id), id);
     return;
   }
-  await saveEntries(moved);
+  await saveEntries([...moved, ...levelsAtStart(entry).map(earlier)]);
   const [from, to] = moved.map(entryTime);
   const name = trackerById(entry.tracker_id).name;
   toast(moved.length === 1 ? `Moved to ${formatTime(from)}` : `Moved ${name} to ${formatTime(from)}–${formatTime(to)}`, id);
@@ -135,14 +151,17 @@ export const editEpisode = safely(async (episode: Episode, startTime: string, en
 
 export const deleteEntry = safely(async (id: string, message: string) => {
   const entry = data().entries.get(id);
-  if (entry) await saveEntries([deletedEntry(entry)]);
+  if (entry) await saveEntries([entry, ...levelsAtStart(entry)].map(deletedEntry));
   toast(message);
 });
 
-/** Deletes an episode: its start and, if it has one, its end. */
+/** Deletes an episode: its start, its end if it has one, and the levels logged while it lasted. */
 export const deleteEpisode = safely(async (episode: Episode) => {
   const ids = episode.endEntryId ? [episode.id, episode.endEntryId] : [episode.id];
-  await saveEntries(ids.map(id => deletedEntry(data().entries.get(id)!)));
+  const levels = [...data().entries.values()].filter(e =>
+    e.kind === 'level' && !e.deleted && e.tracker_id === episode.trackerId
+    && entryTime(e) >= episode.start && entryTime(e) <= episode.end);
+  await saveEntries([...ids.map(id => data().entries.get(id)!), ...levels].map(deletedEntry));
   toast('Deleted');
 });
 

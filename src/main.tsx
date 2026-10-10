@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { loadFromDevice } from './lib/store';
 import { sync } from './lib/sync';
+import './lib/theme';
 import './styles.css';
 
 const SYNC_INTERVAL_MS = 60_000;

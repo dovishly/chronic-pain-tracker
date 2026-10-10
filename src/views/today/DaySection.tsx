@@ -40,9 +40,9 @@ export function DaySection({ shownDay, onShowDay }: Props) {
   const close = () => setOpenId(null);
 
   return (
-    <section className="day-section" aria-labelledby="day-heading">
+    <section className="day-section stack" aria-labelledby="day-heading">
       <div className="row-between">
-        <h2 id="day-heading">Day</h2>
+        <h2 id="day-heading">Your day</h2>
         <div className="day-nav">
           <button className="icon-button" id="previous-day" type="button" aria-label="Previous day"
             disabled={position <= 0} onClick={() => step(-1)}>‹</button>
@@ -51,8 +51,8 @@ export function DaySection({ shownDay, onShowDay }: Props) {
             disabled={position >= days.length - 1} onClick={() => step(1)}>›</button>
         </div>
       </div>
-      <div className="panel stack">
-        <DayTotals bounds={bounds} entries={entries} episodes={episodes} />
+      <DayTotals bounds={bounds} entries={entries} episodes={episodes} />
+      <div className="day-log-panel">
         {lines.every(line => line.row.type === 'now') ? (
           <ul className="day-log" id="day-log" data-lanes={0}>
             <li>
@@ -140,12 +140,14 @@ function LogRow({ line: { row, timeLabel, bars }, bounds, openId, openCheckin, o
 
     case 'episode': {
       const { episode } = row;
+      const tracker = data.trackers.get(episode.trackerId)!;
       const isOpen = openId === episode.id;
       return (
         <li className="day-row">
-          <RowButton variant="is-episode" color={data.trackers.get(episode.trackerId)!.color} time={timeLabel}
+          <RowButton variant="is-episode" color={tracker.color} time={timeLabel}
             note={episodeNotes(data, episode).join(' · ')} isOpen={isOpen} onClick={() => onToggle(episode.id)}>
-            {episodeText(data, episode, bounds)}
+            <span className="entry-name" style={colorStyle(tracker.color)}>{tracker.name}</span>
+            {episodeDetails(episode, bounds)}
           </RowButton>
           <Lanes bars={bars} />
           {isOpen && <EpisodeEditor episode={episode} onDone={onClose} />}
@@ -230,12 +232,12 @@ function checkinSummary(data: Data, answers: Entry[]): string {
 }
 
 /**
- * "Tired · until 7:20 PM · 45 min", "Headache · 25 min so far", or for one that began on an earlier day,
- * "Tired · since Mon, Nov 10 10:00 PM · until 7:00 AM · 9 h 00 min".
+ * What follows the episode's name: " · until 7:20 PM · 45 min", " · 25 min so far", or for one that began on an
+ * earlier day, " · since Mon, Nov 10 10:00 PM · until 7:00 AM · 9 h 00 min".
  */
-function episodeText(data: Data, episode: Episode, bounds: DayBounds): string {
+function episodeDetails(episode: Episode, bounds: DayBounds): string {
   const now = Date.now();
-  const parts = [data.trackers.get(episode.trackerId)!.name];
+  const parts = [''];
   if (episode.start < bounds.from) parts.push(`since ${formatDayTime(episode.start)}`);
   if (episode.status !== 'ongoing') {
     parts.push(`until ${episode.end < bounds.to ? formatTime(episode.end) : formatDayTime(episode.end)}`);

@@ -371,20 +371,23 @@ def test_help_explains_where_data_is_kept(phone1):
 
 
 def test_start_and_stop_episodes(phone1):
-    tired = phone1.locator('#running .running-pill', has_text='Tired')
+    tired = phone1.locator('.episode-card.is-running', has_text='Tired')
     phone1.locator('.episode-card .episode-button', has_text='Tired').click()
     expect(tired).to_have_count(1)
+    expect(tired.locator('.level-buttons')).to_have_count(0)  # Tired has no levels
 
     phone1.locator('.episode-card .episode-button', has_text='Headache').click()
-    phone1.locator('.episode-card.is-running .level-buttons button[data-level="2"]').first.click()
-    expect(phone1.locator('#running')).to_contain_text('Moderate')
+    headache = phone1.locator('.episode-card.is-running', has_text='Headache')
+    headache.locator('.level-buttons button[data-level="2"]').click()
+    expect(headache.locator('.level-buttons button[aria-pressed="true"]')).to_have_text('Moderate')
 
-    tired.click()  # tapping a running episode's pill stops it
+    tired.locator('.episode-button').click()  # tapping a running episode's tile stops it
     expect(tired).to_have_count(0)
 
 
 def test_moments_and_the_days_log(phone1):
     phone1.locator('.moment-button', has_text='Coffee').click()
+    expect(phone1.locator('.moment-button', has_text='Coffee')).to_have_attribute('aria-label', 'Coffee, 1 today')
     log = phone1.locator('#day-log')
     expect(log).to_contain_text('Coffee')
     expect(log).to_contain_text('Tired · until')  # one row for the whole episode
@@ -465,7 +468,7 @@ def test_custom_color(phone1):
     phone1.page.click('#editor-save')
     dot = phone1.locator('.tracker-list li', has_text='Stiffness').locator('.color-dot')
     expect(dot).to_have_css('background-color', 'rgb(255, 214, 10)')
-    assert dot.evaluate("dot => dot.style.getPropertyValue('--on')") == '#15202B'  # dark text on it
+    assert dot.evaluate("dot => dot.style.getPropertyValue('--on')") == '#1E2A24'  # dark text on it
 
 
 def test_rename_a_tracker_but_not_change_its_type(phone1):
@@ -887,16 +890,16 @@ def test_ended_episode_stops_below_now(browser, supabase):
 def test_moving_an_episode_earlier_keeps_it_whole(browser, supabase):
     phone = Phone(browser, supabase)
     pain = phone.locator('.episode-card .episode-button', has_text='Pain')
-    running = phone.locator('#running')
+    running = phone.locator('.episode-card.is-running', has_text='Pain')
     # Started and stopped at once, then −15 on the "ended" toast: it would end before it started, so the
     # whole episode moves back instead of Pain coming back on.
     pain.click()
-    expect(running).to_contain_text('Pain')
+    expect(running).to_have_count(1)
     pain.click()
-    expect(running).not_to_contain_text('Pain')
+    expect(running).to_have_count(0)
     phone.locator('.toast button', has_text='15').click()
     expect(phone.locator('.toast')).to_contain_text('Moved Pain to')
-    expect(running).not_to_contain_text('Pain')
+    expect(running).to_have_count(0)
     expect(phone.locator('#day-log')).to_contain_text('Pain · until')
     expect(phone.locator('#day-log')).not_to_contain_text('Pain ended')
 
@@ -906,8 +909,64 @@ def test_moving_an_episode_earlier_keeps_it_whole(browser, supabase):
     expect(phone.locator('.toast')).to_contain_text('Moved to')
     phone.locator('.toast button', has_text='15').click()
     expect(phone.locator('.toast')).to_contain_text('That would overlap another Pain.')
-    expect(running).to_contain_text('Pain')
+    expect(running).to_have_count(1)
     expect(phone.locator('#day-log .entry-row.is-episode', has_text='Pain')).to_have_count(2)
+
+
+def test_tapping_a_level_starts_the_episode_at_it(browser, supabase):
+    phone = Phone(browser, supabase)
+    pain = phone.locator('.episode-card', has_text='Pain')
+    expect(pain.locator('.level-buttons button')).to_have_count(3)  # shown before it's started, too
+    pain.locator('.level-buttons button[data-level="3"]').click()
+    expect(pain).to_have_class(re.compile(r'\bis-running\b'))
+    expect(pain.locator('.level-buttons button[aria-pressed="true"]')).to_have_text('Severe')
+    expect(phone.locator('#day-log')).to_contain_text('Pain: Severe')
+
+    # Undo takes the level away with the start, rather than leave it on its own.
+    phone.locator('.toast button', has_text='Undo').click()
+    expect(pain).not_to_have_class(re.compile(r'\bis-running\b'))
+    expect(phone.locator('#day-log')).not_to_contain_text('Pain')
+
+
+def test_deleting_an_episode_takes_its_levels_along(browser, supabase):
+    headache, coffee = make_tracker('Headache', 'episode'), make_tracker('Coffee', 'moment')
+    moderate = {**make_entry(headache, 'level', minutes_ago(40)), 'value': 2, 'text': 'Moderate'}
+    later = {**make_entry(headache, 'level', minutes_ago(5)), 'value': 1, 'text': 'Mild'}  # after it ended
+    phone = phone_with(browser, supabase, [headache, coffee], [
+        make_entry(headache, 'start', minutes_ago(50)),
+        moderate,
+        make_entry(coffee, 'moment', minutes_ago(30)),
+        make_entry(headache, 'end', minutes_ago(20)),
+        later,
+    ], timezone=None)
+    log = phone.locator('#day-log')
+    expect(log).to_contain_text('Headache: Moderate')
+    phone.locator('.entry-row.is-episode').click()
+    phone.locator('.entry-editor .button.danger').click()
+    expect(log).not_to_contain_text('Headache: Moderate')
+    expect(log).to_contain_text('Coffee')             # logged during it, but not its own
+    expect(log).to_contain_text('Headache: Mild')     # logged after it ended
+    assert phone.stored('entries', moderate['id'])['deleted']
+
+
+def test_appearance_is_picked_in_settings_and_kept(browser, supabase):
+    phone = Phone(browser, supabase)  # a phone in light mode
+    html = phone.locator('html')
+    background = lambda: phone.page.evaluate('getComputedStyle(document.body).backgroundColor')
+    expect(html).to_have_attribute('data-theme', 'light')
+    phone.go_to('Settings')
+    phone.locator('#theme-choice button', has_text='Dark').click()
+    expect(html).to_have_attribute('data-theme', 'dark')
+    assert background() == 'rgb(18, 24, 20)'
+    assert phone.locator('meta[name="theme-color"]').first.get_attribute('content') == '#121814'
+
+    phone.open()  # kept when the app is opened again, from the first paint
+    expect(html).to_have_attribute('data-theme', 'dark')
+    phone.go_to('Settings')
+    expect(phone.locator('#theme-choice button[aria-pressed="true"]')).to_have_text('Dark')
+    phone.locator('#theme-choice button', has_text='Match phone').click()
+    expect(html).to_have_attribute('data-theme', 'light')
+    assert background() == 'rgb(232, 236, 230)'
 
 
 def test_editing_episodes_keeps_them_whole(browser, supabase):

@@ -25,6 +25,6 @@ function textOn(hex: string): string {
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
   };
   const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  const DARK = 0.0137; // luminance of #15202B, the light theme's text color
-  return (luminance + 0.05) / (DARK + 0.05) > 1.05 / (luminance + 0.05) ? '#15202B' : '#FFFFFF';
+  const DARK = 0.0206; // luminance of #1E2A24, the light theme's text color
+  return (luminance + 0.05) / (DARK + 0.05) > 1.05 / (luminance + 0.05) ? '#1E2A24' : '#FFFFFF';
 }

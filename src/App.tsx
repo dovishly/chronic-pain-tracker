@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { dayKey } from './lib/util';
+import { dayKey, longDate } from './lib/util';
+import { useNow } from './hooks';
 import { TabBar, VIEW_TITLES, type View } from './components/TabBar';
 import { SyncPill } from './components/SyncPill';
 import { StorageHelp } from './components/StorageHelp';
@@ -29,7 +30,10 @@ export function App() {
     <>
       <main className="page">
         <div className="page-header">
-          <h1>{VIEW_TITLES[view]}</h1>
+          <div>
+            {view === 'today' && <TodayDate />}
+            <h1>{VIEW_TITLES[view]}</h1>
+          </div>
           <div className="header-actions">
             <SyncPill onClick={() => selectTab('settings')} />
             <StorageHelp onOpenSettings={() => selectTab('settings')} />
@@ -45,4 +49,10 @@ export function App() {
       </div>
     </>
   );
+}
+
+/** Above the Today heading: "Saturday, October 10". Checked every minute, so it turns over at midnight. */
+function TodayDate() {
+  const now = useNow(60_000);
+  return <p className="page-date">{longDate(now)}</p>;
 }
