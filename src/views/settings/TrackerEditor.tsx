@@ -98,8 +98,11 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
       type,
       group_name: group.trim(),
       color,
-      // Keeps any settings this form doesn't know about (from a newer version of the app).
-      config: { ...(type === tracker.type ? tracker.config : {}), ...configFromFields(type, fields) },
+      // Keeps any settings this form doesn't know about (from a newer version of the app), and its place in a row.
+      config: {
+        ...(type === tracker.type ? tracker.config : { new_row: tracker.config.new_row }),
+        ...configFromFields(type, fields),
+      },
     };
     const problem = trackerProblem(edited);
     if (problem) {

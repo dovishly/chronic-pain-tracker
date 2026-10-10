@@ -541,19 +541,17 @@ textarea {
 
 /* ===================== Today: start/stop tiles ===================== */
 
-/* A heading's trackers, two to a row, in exactly the order they were arranged in: start/stop tiles and one-tap
-   buttons alike. Not dense, so a half-width one just before a full row keeps its row to itself, if that's where
-   it was put. Nothing changes size when an episode starts or stops, so the layout stays put. */
+/* A heading's trackers in the rows they were arranged in, up to two to a row: start/stop tiles and one-tap
+   buttons alike. Each row's first starts on the left, so a wider screen has the same rows, at the same size,
+   with room to the right. Nothing changes size when an episode starts or stops, so the layout stays put. */
 .today-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
 }
 
-/* Under the last heading, out of the way: changes the order, not what's logged. */
-.arrange-link {
-  align-self: flex-end;
-  margin-top: -14px;
+.today-grid > .starts-row {
+  grid-column-start: 1;
 }
 
 /* At rest: flat, outlined in the tracker's color. The outline is as thick at rest as running, so a tile is the
@@ -761,8 +759,18 @@ textarea {
   min-width: 0;
 }
 
-.arrange-hint b {
+.arrange-picked {
+  font-weight: 700;
   font-size: 1.05rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arrange-arrow.arrange-new-row {
+  width: auto;
+  padding: 0 10px;
+  font-size: .9rem;
 }
 
 .arrange-bar .button.primary {
@@ -784,13 +792,18 @@ textarea {
   flex: none;
 }
 
-/* A heading's own up and down, beside it. */
+/* Beside a heading while arranging: "+ Add", and the heading's own up and down. */
 .heading-moves {
   display: flex;
+  align-items: center;
   gap: 6px;
 }
 
-.heading-moves button {
+.heading-moves .add-link {
+  margin-right: 4px;
+}
+
+.heading-move {
   border: 1.5px solid var(--outline);
   background: var(--tab);
   color: var(--ink);
@@ -801,9 +814,54 @@ textarea {
   font-weight: 700;
 }
 
-/* Something to drop on, once a heading's last tile has been dragged out. */
+/* Rows set apart by the gaps between them, which take a dropped tile as a new row. */
 .arrange-grid {
+  row-gap: 0;
+}
+
+.arrange-gap {
+  grid-column: 1 / -1;
+  height: 16px;
+  position: relative;
+}
+
+.arrange-gap::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  translate: 0 -50%;
+  border-radius: 2px;
+}
+
+/* While dragging, a faint line where a new row can go; under the tile, a solid one. */
+.arrange-grid.is-dragging .arrange-gap::after {
+  border-top: 2px dashed var(--dash);
+}
+
+.arrange-gap.is-over::after {
+  border-top: 0;
+  height: 4px;
+  background: var(--ink);
+}
+
+/* The empty half of a row with one tile in it. */
+.arrange-space {
+  border: 2px dashed var(--dash);
+  border-radius: 18px;
   min-height: 52px;
+}
+
+.arrange-space.is-over {
+  border-color: var(--outline);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+/* A tile another is held over: let go and they trade places. */
+.arrange-tile.is-target {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
 }
 
 /* A tracker as it sits on Today, as wide and the same shape, with a grip. A short press lifts it, so the page

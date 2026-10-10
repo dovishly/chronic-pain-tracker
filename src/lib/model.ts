@@ -17,6 +17,7 @@ export interface TrackerConfig {
   step?: number | null;   // number
   options?: string[];     // choice
   multi?: boolean;        // choice: more than one option may be picked
+  new_row?: boolean;      // episode, moment: starts a new row on Today, even if the row before has room
 }
 
 export interface Tracker {
@@ -218,6 +219,23 @@ export const activeTrackers = (data: Data, ...types: TrackerType[]) =>
   allTrackers(data).filter(t => !t.archived && (!types.length || types.includes(t.type)));
 
 export const groupName = (tracker: Tracker) => tracker.group_name || 'Other';
+
+/** A start/stop tracker with levels: a whole row on Today to itself, with its levels underneath. */
+export const isWide = (tracker: Tracker) => tracker.type === 'episode' && (tracker.config.levels || []).some(Boolean);
+
+/**
+ * A heading's Today trackers in rows of up to two: a new row for one marked to start one, one with levels (which
+ * has its row to itself), and once a row is full.
+ */
+export function todayRows(trackers: Tracker[]): Tracker[][] {
+  const rows: Tracker[][] = [];
+  for (const tracker of trackers) {
+    const row = rows.at(-1);
+    if (!row || tracker.config.new_row || isWide(tracker) || isWide(row[0]) || row.length >= 2) rows.push([tracker]);
+    else row.push(tracker);
+  }
+  return rows;
+}
 
 /** [heading, trackers] pairs, in order of each heading's first tracker. */
 export const groupTrackers = (trackers: Tracker[]) => [...groupBy(trackers, groupName)];

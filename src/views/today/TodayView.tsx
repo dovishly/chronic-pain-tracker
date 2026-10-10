@@ -1,8 +1,7 @@
-import { useState } from 'react';
 import { useNow, useData } from '../../hooks';
 import { formatDuration } from '../../lib/util';
 import {
-  activeTrackers, groupTrackers, runningEpisodes, type RunningEpisode, type Tracker,
+  activeTrackers, groupTrackers, isWide, runningEpisodes, todayRows, type RunningEpisode, type Tracker,
 } from '../../lib/model';
 import { logLevel, logMoment, startAtLevel, toggleEpisode } from '../../lib/actions';
 import { colorStyle } from '../../components/color';
@@ -18,21 +17,22 @@ interface Props {
   shownDay: string;
   onShowDay: (day: string) => void;
   onAddTracker: (request: NewTrackerRequest) => void;
+  arranging: boolean;
+  onArrange: (arranging: boolean) => void;
 }
 
-export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
+export function TodayView({ shownDay, onShowDay, onAddTracker, arranging, onArrange }: Props) {
   const data = useData();
   const now = useNow(CLOCK_REFRESH_MS);
   const running = runningEpisodes(data);
-  const [arranging, setArranging] = useState(false);
-  // Under the headings the person gave them, in the order they put them in: start/stop tiles and one-tap buttons
-  // side by side, two to a row.
+  // Under the headings the person gave them, in the rows they put them in: start/stop tiles and one-tap buttons
+  // side by side.
   const groups = groupTrackers(activeTrackers(data, 'episode', 'moment'));
 
   if (arranging && groups.length) {
     return (
       <section id="view-today" className="stack spacious is-arranging">
-        <ArrangeToday data={data} running={new Set(running.keys())} onDone={() => setArranging(false)} />
+        <ArrangeToday data={data} running={new Set(running.keys())} onAddTracker={onAddTracker} onDone={() => onArrange(false)} />
       </section>
     );
   }
@@ -41,24 +41,24 @@ export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
     <section id="view-today" className="stack spacious">
       {groups.length ? (
         <>
-          {groups.map(([group, trackers]) => (
+          {groups.map(([group, trackers], g) => (
             <section key={group}>
               <div className="row-between section-header">
                 <h2>{group}</h2>
-                {/* A new one of the kind the section already has, start/stop first. */}
-                <AddLink label={`Add to ${group}`}
-                  onClick={() => onAddTracker({ type: trackers.some(t => t.type === 'episode') ? 'episode' : 'moment', group })} />
+                {/* Adding is in Arrange, with moving, so nothing here but the trackers is tapped by mistake. */}
+                {g === 0 && (
+                  <button type="button" className="add-link" id="arrange-today" onClick={() => onArrange(true)}>
+                    Arrange
+                  </button>
+                )}
               </div>
               <div className="today-grid">
-                {trackers.map(tracker => (tracker.type === 'episode'
-                  ? <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} />
-                  : <MomentButton key={tracker.id} tracker={tracker} />))}
+                {todayRows(trackers).flatMap(row => row.map((tracker, i) => (tracker.type === 'episode'
+                  ? <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} startsRow={i === 0} />
+                  : <MomentButton key={tracker.id} tracker={tracker} startsRow={i === 0} />)))}
               </div>
             </section>
           ))}
-          <button type="button" className="add-link arrange-link" id="arrange-today" onClick={() => setArranging(true)}>
-            Arrange
-          </button>
         </>
       ) : (
         <section>
@@ -79,11 +79,11 @@ export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
  * A one-tap button: half a row like a start/stop tile, but with round ends and a "+" where the tile has its ring.
  * How many times it was logged is in the day's totals below.
  */
-function MomentButton({ tracker }: { tracker: Tracker }) {
+function MomentButton({ tracker, startsRow }: { tracker: Tracker; startsRow: boolean }) {
   return (
     <button
       type="button"
-      className="moment-button"
+      className={startsRow ? 'moment-button starts-row' : 'moment-button'}
       style={colorStyle(tracker.color)}
       data-moment={tracker.id}
       onClick={() => logMoment(tracker.id)}
@@ -98,10 +98,13 @@ function MomentButton({ tracker }: { tracker: Tracker }) {
  * A start/stop button. At rest it's outlined; while running it's filled in, with how long it's been going. One with
  * levels always takes a whole row, its levels underneath: tapping one sets it, or starts it at that level.
  */
-function EpisodeCard({ tracker, episode, now }: { tracker: Tracker; episode?: RunningEpisode; now: number }) {
+function EpisodeCard({ tracker, episode, now, startsRow }: {
+  tracker: Tracker; episode?: RunningEpisode; now: number; startsRow: boolean;
+}) {
   const levels = (tracker.config.levels || []).filter(Boolean);
-  const hasLevels = levels.length > 0;
-  const className = ['episode-card', episode && 'is-running', hasLevels && 'has-levels'].filter(Boolean).join(' ');
+  const hasLevels = isWide(tracker);
+  const className = ['episode-card', episode && 'is-running', hasLevels && 'has-levels', startsRow && 'starts-row']
+    .filter(Boolean).join(' ');
   const pickLevel = (level: number) => (episode ? logLevel(tracker.id, level) : startAtLevel(tracker.id, level));
 
   return (

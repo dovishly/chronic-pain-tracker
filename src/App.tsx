@@ -16,9 +16,12 @@ export function App() {
   const [checkin, setCheckin] = useState<CheckinDraft>(emptyCheckin);
   // A tracker being added from "+ Add" on Today or Check in, and where to go back to once it's saved or cancelled.
   const [adding, setAdding] = useState<(NewTrackerRequest & { from: View; scrollY: number }) | null>(null);
+  // Arranging Today. Here so it lasts through adding a tracker from it, and ends on changing tabs.
+  const [arranging, setArranging] = useState(false);
 
   const selectTab = (next: View) => {
     setAdding(null);
+    setArranging(false);
     setView(next);
     window.scrollTo(0, 0);
   };
@@ -29,7 +32,7 @@ export function App() {
     window.scrollTo(0, 0);
   };
 
-  /** Back where "+ Add" was tapped, scrolled as it was. */
+  /** Back where "+ Add" was tapped (arranging, if it was there), scrolled as it was. */
   const finishAdding = () => {
     if (!adding) return;
     const { from, scrollY } = adding;
@@ -57,7 +60,10 @@ export function App() {
             <StorageHelp onOpenSettings={() => selectTab('settings')} />
           </div>
         </div>
-        {view === 'today' && <TodayView shownDay={shownDay} onShowDay={setShownDay} onAddTracker={addTracker} />}
+        {view === 'today' && (
+          <TodayView shownDay={shownDay} onShowDay={setShownDay} onAddTracker={addTracker}
+            arranging={arranging} onArrange={setArranging} />
+        )}
         {view === 'checkin' && (
           <CheckinView draft={checkin} onChange={setCheckin} onSaved={showSavedCheckin} onAddTracker={addTracker} />
         )}
