@@ -699,6 +699,31 @@ textarea {
   font-weight: 700;
 }
 
+/* A thin line between two choices on a track, in the gap between them. None beside the picked one: it's raised. */
+.level-buttons button,
+.segmented button {
+  position: relative;
+}
+
+.level-buttons button + button::before,
+.segmented button + button::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 25%;
+  bottom: 25%;
+  width: 1.5px;
+  border-radius: 1px;
+  background: color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.level-buttons button[aria-pressed="true"]::before,
+.level-buttons button[aria-pressed="true"] + button::before,
+.segmented button[aria-pressed="true"]::before,
+.segmented button[aria-pressed="true"] + button::before {
+  display: none;
+}
+
 /* ===================== Today: moments ===================== */
 
 /* Half a row like a start/stop tile, but with round ends, and a "+" where the tile has its ring: one tap adds

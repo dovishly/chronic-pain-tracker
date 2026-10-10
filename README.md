@@ -11,6 +11,11 @@ Log Lightly is **one tap**.
 
 Each tap lands on the timeline by itself the moment it happens. It changes all day, the same way I do. Because every tap is its own timestamped record, the data is ready to analyze. Export it to a spreadsheet anytime. It works offline, and can sync to your own private database.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screens-light.png">
+  <img src="docs/screens-light.png" alt="Three screens of Log Lightly: symptom and moment buttons with joint pain running at Moderate; the day's timeline of pain episodes, doses, meals and check-ins; and a check-in being filled out">
+</picture>
+
 - **Today:** start/stop buttons for things that come and go (tap when it starts, tap again when it stops), one-tap moments, and the day's timeline. It's everything you logged, newest first, with each episode drawn as a bar alongside. Tap any entry to change its time or add a note.
 - **Check in:** ratings, numbers, choices and notes. Every question is optional.
 - **Settings:** add, rename, recolor, reorder, archive trackers, connect to a database, and export your data/restore a backup.
