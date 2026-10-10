@@ -1,4 +1,4 @@
--- Logbook: database setup
+-- Log Lightly: database setup
 -- Paste this whole file into Supabase → SQL Editor → New query, then click Run.
 -- Safe to run more than once. When the app is updated with database changes, run the whole file again:
 -- the app checks logbook_schema_version() (at the end) and says so when this is needed.

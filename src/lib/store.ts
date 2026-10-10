@@ -72,7 +72,7 @@ export function addStarterTrackers(): Promise<void> {
   )));
 }
 
-/** Erases everything Logbook keeps on this device: trackers, entries, the outbox and all settings. */
+/** Erases everything Log Lightly keeps on this device: trackers, entries, the outbox and all settings. */
 export async function eraseDevice(): Promise<void> {
   for (const store of ['trackers', 'entries', 'outbox', 'meta'] as const) await db.clear(store);
   prefs.clearAll();

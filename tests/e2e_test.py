@@ -1,4 +1,4 @@
-"""End-to-end tests for Logbook.
+"""End-to-end tests for Log Lightly.
 
 Serves the built app (dist/) locally, drives it in headless Chromium at phone size, and fakes the
 Supabase REST/Auth API in-process, so no real project or network is needed.
@@ -625,7 +625,7 @@ def test_outdated_database_stops_sync(phone2, supabase):
     supabase.schema_version = 0  # the owner hasn't run the latest schema.sql yet
     phone2.sign_in()
     expect(phone2.locator('#sync-pill')).to_contain_text('Action needed')
-    expect(phone2.locator('#sync-panel')).to_contain_text("Your Supabase project needs Logbook's tables")
+    expect(phone2.locator('#sync-panel')).to_contain_text("Your Supabase project needs Log Lightly's tables")
     expect(phone2.locator('#trackers')).not_to_contain_text('Drowsy')
 
 
@@ -772,7 +772,7 @@ def test_reset_everywhere(phone1, phone3, supabase):
 
 
 def test_another_project_gets_its_schema_checked(phone1, supabase):
-    # Connecting a project in the same session as another: this one may not have Logbook's tables yet.
+    # Connecting a project in the same session as another: this one may not have Log Lightly's tables yet.
     phone1.page.click('#sign-out')
     phone1.page.click('#project-disconnect')
     supabase.schema_version = 0

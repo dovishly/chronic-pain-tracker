@@ -23,7 +23,7 @@ export function StorageHelp({ onOpenSettings }: { onOpenSettings: () => void }) 
         <div className="help-dialog-body stack">
           <h2 className="help-title" id="storage-help-title" ref={title} tabIndex={-1}>Where your data lives</h2>
           <p>
-            Everything you log is saved on this phone first, so Logbook works offline and without an account.
+            Everything you log is saved on this phone first, so Log Lightly works offline and without an account.
             {projectUrl
               ? " You've also connected Supabase, so there's a copy online too."
               : " At the moment, it's only on this phone."}
@@ -34,7 +34,7 @@ export function StorageHelp({ onOpenSettings }: { onOpenSettings: () => void }) 
             <ul>
               <li>Simple and private: no account, and nothing leaves your phone.</li>
               <li>
-                If you delete Logbook from your Home Screen, clear Safari's data, or lose your phone,
+                If you delete Log Lightly from your Home Screen, clear Safari's data, or lose your phone,
                 your entries go with it.
               </li>
               <li>
@@ -52,7 +52,7 @@ export function StorageHelp({ onOpenSettings }: { onOpenSettings: () => void }) 
             <ul>
               <li>
                 Supabase is a free online database. You set up your own (about 15 minutes, in <b>Settings → Sync</b>),
-                and Logbook keeps a copy of everything there.
+                and Log Lightly keeps a copy of everything there.
               </li>
               <li>Lose or replace your phone? Sign in again and it all comes back. It works across devices, too.</li>
               <li>

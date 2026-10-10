@@ -1,6 +1,6 @@
 {
-  "name": "Logbook",
-  "short_name": "Logbook",
+  "name": "Log Lightly",
+  "short_name": "Log Lightly",
   "description": "A personal tracker for symptoms, episodes, and moments.",
   "start_url": "./",
   "scope": "./",

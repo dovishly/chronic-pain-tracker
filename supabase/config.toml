@@ -1,4 +1,4 @@
-# Local Supabase for developing and testing Logbook (see "Testing with a local Supabase" in README.md).
+# Local Supabase for developing and testing Log Lightly (see "Testing with a local Supabase" in README.md).
 # Nothing here is secret: the local keys are the CLI's public defaults, and this never touches a real project.
 # For detailed configuration reference documentation, visit:
 # https://supabase.com/docs/guides/local-development/cli/config
@@ -71,7 +71,7 @@ schema_paths = []
 enabled = true
 # Specifies an ordered list of seed files to load during db reset.
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
-# Logbook: the database setup is schema.sql itself, so local matches what the README has you run in a real project.
+# Log Lightly: the database setup is schema.sql itself, so local matches what the README has you run in a real project.
 sql_paths = ["../schema.sql"]
 
 [db.network_restrictions]
@@ -89,7 +89,7 @@ allowed_cidrs_v6 = ["::/0"]
 # enabled = true
 
 [realtime]
-enabled = false # not used by Logbook
+enabled = false # not used by Log Lightly
 # Bind realtime via either IPv4 or IPv6. (default: IPv4)
 # ip_version = "IPv6"
 # The maximum length in bytes of HTTP request headers. (default: 4096)
@@ -117,7 +117,7 @@ port = 54324
 # sender_name = "Admin"
 
 [storage]
-enabled = false # not used by Logbook
+enabled = false # not used by Log Lightly
 # The maximum file size allowed (e.g. "5MB", "500KB").
 file_size_limit = "50MiB"
 
@@ -177,7 +177,7 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
-# Logbook: off, as the README has you set it in a real project. Add users in Studio instead.
+# Log Lightly: off, as the README has you set it in a real project. Add users in Studio instead.
 enable_signup = false
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
@@ -223,7 +223,7 @@ web3 = 30
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
-# Logbook: must stay true. Despite the name, false turns off email sign-in entirely ("Email logins are disabled");
+# Log Lightly: must stay true. Despite the name, false turns off email sign-in entirely ("Email logins are disabled");
 # new sign-ups are already blocked by [auth] enable_signup = false above.
 enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
@@ -379,7 +379,7 @@ authorization_url_path = "/oauth/consent"
 allow_dynamic_registration = false
 
 [edge_runtime]
-enabled = false # not used by Logbook
+enabled = false # not used by Log Lightly
 # Supported request policies: `oneshot`, `per_worker`.
 # `per_worker` (default) — enables hot reload during local development.
 # `oneshot` — fallback mode if hot reload causes issues (e.g. in large repos or with symlinks).
@@ -393,7 +393,7 @@ deno_version = 2
 # secret_key = "env(SECRET_VALUE)"
 
 [analytics]
-enabled = false # not used by Logbook
+enabled = false # not used by Log Lightly
 port = 54327
 # Configure one of the supported backends: `postgres`, `bigquery`.
 backend = "postgres"

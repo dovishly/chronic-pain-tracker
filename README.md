@@ -1,4 +1,4 @@
-# Logbook
+# Log Lightly
 
 My symptoms change hour to hour, so I'm building a logbook that keeps up.
 
@@ -6,7 +6,7 @@ I couldn't find an app that did **everything** I needed it to do, so now here co
 
 Every app I've tried makes me build an "entry" for everything. Right now I'm dozing off and it's getting harder to write this, but to log that I'd have to rate my mood first, as if I have the energy for that a dozen times a day.
 
-Logbook is **one tap**.
+Log Lightly is **one tap**.
 
 - **Pain starts?** Tap *Pain*. It records until you tap it again. Rate the severity **in one tap** while it runs, and change it as it gets better or worse.
 - **Took a rescue dose? Ate a snack? Fainted?** Tap it once and it's on the timeline.

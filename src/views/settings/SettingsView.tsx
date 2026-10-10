@@ -107,7 +107,7 @@ function StartOver() {
       {confirming === 'device' && (
         <div className="notice stack">
           <p>
-            <b>Reset this phone?</b> Everything on it is erased, including your Supabase sign-in, and Logbook starts
+            <b>Reset this phone?</b> Everything on it is erased, including your Supabase sign-in, and Log Lightly starts
             again with the starter trackers.{' '}
             {signedIn
               ? "Your synced data stays in Supabase: connect and sign in again to get it back. Anything that hasn't synced yet is lost."
@@ -123,7 +123,7 @@ function StartOver() {
         <div className="notice stack">
           <p>
             <b>Reset everywhere?</b> Every tracker and entry is deleted, here, in Supabase, and on your other phones
-            when they next sync. Logbook starts again with the starter trackers. This can't be undone, so export a
+            when they next sync. Log Lightly starts again with the starter trackers. This can't be undone, so export a
             backup first if you might want it.
           </p>
           <div className="button-row">

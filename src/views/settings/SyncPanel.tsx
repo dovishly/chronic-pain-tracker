@@ -30,7 +30,7 @@ function ConnectForm() {
   return (
     <>
       <p className="small">
-        Logbook works on this device without an account. To back up and sync, connect your own Supabase project (see the setup guide).
+        Log Lightly works on this device without an account. To back up and sync, connect your own Supabase project (see the setup guide).
       </p>
       <label className="field">
         Project URL
@@ -147,12 +147,12 @@ const copySetupSql = safely(async () => {
   toast('Setup SQL copied');
 });
 
-/** Shown when the project doesn't have Logbook's tables yet, or has an older version of them. */
+/** Shown when the project doesn't have Log Lightly's tables yet, or has an older version of them. */
 function SchemaSetup({ projectUrl }: { projectUrl: string }) {
   const editorUrl = sqlEditorUrl(projectUrl);
   return (
     <div className="notice stack">
-      <p><b>Your Supabase project needs Logbook's tables.</b> This happens once when you set it up, and again when an app update changes them.</p>
+      <p><b>Your Supabase project needs Log Lightly's tables.</b> This happens once when you set it up, and again when an app update changes them.</p>
       <p className="small">
         Copy the setup SQL, paste it into a new query in the Supabase SQL Editor, and click <b>Run</b>. Then tap <b>Sync now</b>.
       </p>
