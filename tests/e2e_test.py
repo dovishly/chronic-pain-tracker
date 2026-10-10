@@ -1001,6 +1001,71 @@ def test_add_from_a_section_and_come_back(browser, supabase):
     expect(phone.locator('h1')).to_have_text('Check in')
 
 
+def today_layout(phone):
+    """Today's headings, each with its trackers' names, in the order they show."""
+    return phone.page.evaluate('''() => [...document.querySelectorAll('#view-today > section')]
+      .filter(section => section.querySelector('.today-grid'))
+      .map(section => [
+        section.querySelector('h2').textContent,
+        [...section.querySelectorAll('.today-grid > *')]
+          .map(tile => tile.querySelector('.episode-name, .moment-name, .arrange-name').textContent),
+      ])''')
+
+
+def test_arrange_today_with_the_arrows(browser, supabase):
+    phone = Phone(browser, supabase)
+    assert today_layout(phone) == [['Symptoms', ['Pain', 'Fatigue']], ['Moments', ['Medication']]]
+    phone.page.click('#arrange-today')
+    phone.locator('button[aria-label="Move Moments up"]').click()
+    expect(phone.locator('#view-today h2').first).to_have_text('Moments')
+
+    medication = phone.locator('[data-arrange]', has_text='Medication')
+    medication.click()
+    expect(medication).to_have_attribute('aria-pressed', 'true')
+    phone.page.click('#arrange-later')  # past the end of Moments, into the next heading
+    phone.wait_for(lambda: today_layout(phone) == [['Symptoms', ['Medication', 'Pain', 'Fatigue']]])
+    assert today_layout(phone) == [['Symptoms', ['Medication', 'Pain', 'Fatigue']]]
+    medication.press('ArrowRight')  # the arrow keys move a picked tile too
+    phone.wait_for(lambda: today_layout(phone)[0][1] == ['Pain', 'Medication', 'Fatigue'])
+    phone.page.click('#arrange-later')
+    expect(phone.locator('#arrange-later')).to_be_disabled()  # last of all
+    phone.page.click('#arrange-done')
+
+    # Side by side, the start/stop tile and the one-tap button, under the full row with levels.
+    assert today_layout(phone) == [['Symptoms', ['Pain', 'Fatigue', 'Medication']]]
+    fatigue = phone.locator('.episode-card', has_text='Fatigue').bounding_box()
+    medication = phone.locator('.moment-button', has_text='Medication').bounding_box()
+    assert fatigue['y'] == medication['y'] and fatigue['x'] < medication['x']
+
+    phone.open()  # saved
+    assert today_layout(phone) == [['Symptoms', ['Pain', 'Fatigue', 'Medication']]]
+    phone.go_to('Settings')
+    symptoms = phone.locator('.tracker-list-group', has_text='Symptoms').locator('xpath=following-sibling::ul[1]')
+    expect(symptoms).to_contain_text('Medication')
+    names = tracker_names(phone)  # the check-in questions kept their order
+    assert [n for n in names if n in ('Mood', 'Sleep', 'Water', 'Activities', 'Notes')] == ['Mood', 'Sleep', 'Water', 'Activities', 'Notes']
+
+
+def test_arrange_today_by_dragging(browser, supabase):
+    phone = Phone(browser, supabase)
+    phone.page.click('#arrange-today')
+    # Medication, from Moments into the empty half of the row beside Fatigue.
+    tile = phone.locator('[data-arrange]', has_text='Medication').bounding_box()
+    fatigue = phone.locator('[data-arrange]', has_text='Fatigue').bounding_box()
+    start = (tile['x'] + 30, tile['y'] + 20)
+    end = (fatigue['x'] + fatigue['width'] * 1.5, fatigue['y'] + 30)
+    phone.page.mouse.move(*start)
+    phone.page.mouse.down()
+    for step in range(1, 21):
+        phone.page.mouse.move(start[0] + (end[0] - start[0]) * step / 20, start[1] + (end[1] - start[1]) * step / 20)
+    phone.page.mouse.up()
+    phone.wait_for(lambda: today_layout(phone) == [['Symptoms', ['Pain', 'Fatigue', 'Medication']]])
+    assert today_layout(phone) == [['Symptoms', ['Pain', 'Fatigue', 'Medication']]]
+    phone.page.wait_for_timeout(100)  # a click just after a drop is taken as part of the drag, and dropped
+    phone.page.click('#arrange-done')
+    expect(phone.locator('.moment-button', has_text='Medication')).to_have_count(1)
+
+
 def test_editing_episodes_keeps_them_whole(browser, supabase):
     headache, pain = make_tracker('Headache', 'episode'), make_tracker('Pain', 'episode')
     phone = phone_with(browser, supabase, [headache, pain], [  # Nov 13, 2025, New York (UTC-5)

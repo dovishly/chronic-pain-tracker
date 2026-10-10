@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNow, useData } from '../../hooks';
 import { formatDuration } from '../../lib/util';
 import {
@@ -9,6 +10,7 @@ import { CheckIcon } from '../../components/icons';
 import { AddLink } from '../../components/AddLink';
 import type { NewTrackerRequest } from '../settings/SettingsView';
 import { DaySection } from './DaySection';
+import { ArrangeToday } from './ArrangeToday';
 
 const CLOCK_REFRESH_MS = 30_000; // keeps running durations current
 
@@ -22,42 +24,42 @@ export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
   const data = useData();
   const now = useNow(CLOCK_REFRESH_MS);
   const running = runningEpisodes(data);
-  // Under the headings the person gave them, start/stop tiles first and one-tap buttons after.
+  const [arranging, setArranging] = useState(false);
+  // Under the headings the person gave them, in the order they put them in: start/stop tiles and one-tap buttons
+  // side by side, two to a row.
   const groups = groupTrackers(activeTrackers(data, 'episode', 'moment'));
+
+  if (arranging && groups.length) {
+    return (
+      <section id="view-today" className="stack spacious is-arranging">
+        <ArrangeToday data={data} running={new Set(running.keys())} onDone={() => setArranging(false)} />
+      </section>
+    );
+  }
 
   return (
     <section id="view-today" className="stack spacious">
       {groups.length ? (
-        groups.map(([group, trackers]) => {
-          const episodes = trackers.filter(t => t.type === 'episode');
-          const moments = trackers.filter(t => t.type === 'moment');
-          return (
+        <>
+          {groups.map(([group, trackers]) => (
             <section key={group}>
               <div className="row-between section-header">
                 <h2>{group}</h2>
                 {/* A new one of the kind the section already has, start/stop first. */}
                 <AddLink label={`Add to ${group}`}
-                  onClick={() => onAddTracker({ type: episodes.length ? 'episode' : 'moment', group })} />
+                  onClick={() => onAddTracker({ type: trackers.some(t => t.type === 'episode') ? 'episode' : 'moment', group })} />
               </div>
-              <div className="today-group">
-                {episodes.length > 0 && (
-                  <div className="episode-grid">
-                    {episodes.map(tracker => (
-                      <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} />
-                    ))}
-                  </div>
-                )}
-                {moments.length > 0 && (
-                  <div className="moment-buttons">
-                    {moments.map(tracker => (
-                      <MomentButton key={tracker.id} tracker={tracker} />
-                    ))}
-                  </div>
-                )}
+              <div className="today-grid">
+                {trackers.map(tracker => (tracker.type === 'episode'
+                  ? <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} />
+                  : <MomentButton key={tracker.id} tracker={tracker} />))}
               </div>
             </section>
-          );
-        })
+          ))}
+          <button type="button" className="add-link arrange-link" id="arrange-today" onClick={() => setArranging(true)}>
+            Arrange
+          </button>
+        </>
       ) : (
         <section>
           <div className="row-between section-header">
@@ -73,7 +75,10 @@ export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
   );
 }
 
-/** A one-tap button: a pill with a "+". How many times it was logged is in the day's totals below. */
+/**
+ * A one-tap button: half a row like a start/stop tile, but with round ends and a "+" where the tile has its ring.
+ * How many times it was logged is in the day's totals below.
+ */
 function MomentButton({ tracker }: { tracker: Tracker }) {
   return (
     <button
@@ -83,8 +88,8 @@ function MomentButton({ tracker }: { tracker: Tracker }) {
       data-moment={tracker.id}
       onClick={() => logMoment(tracker.id)}
     >
-      <span className="moment-plus" aria-hidden="true">+</span>
-      {tracker.name}
+      <span className="moment-name">{tracker.name}</span>
+      <span className="episode-icon"><PlusIcon /></span>
     </button>
   );
 }
@@ -140,6 +145,15 @@ function StateIcon({ running }: { running: boolean }) {
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
       <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
       {running && <circle cx="7" cy="7" r="3" fill="currentColor" />}
+    </svg>
+  );
+}
+
+/** On a one-tap button, where a start/stop tile has its ring: one tap adds one. */
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M7 1.5 V12.5 M1.5 7 H12.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }

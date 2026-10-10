@@ -155,6 +155,7 @@ button:disabled {
    dark, where a light outline would glare). */
 .episode-card,
 .moment-button,
+.arrange-tile,
 .day-total,
 .entry-name {
   --deep: color-mix(in srgb, var(--c) 40%, var(--ink));
@@ -164,7 +165,7 @@ button:disabled {
   --run-edge: var(--ink);
 }
 
-:root[data-theme="dark"] :is(.episode-card, .moment-button, .day-total, .entry-name) {
+:root[data-theme="dark"] :is(.episode-card, .moment-button, .arrange-tile, .day-total, .entry-name) {
   --tint: color-mix(in oklab, var(--c) 30%, var(--surface));
   --rest-line: color-mix(in srgb, var(--c) 60%, var(--surface));
   --run-line: var(--c);
@@ -538,22 +539,21 @@ textarea {
   margin-right: -4px;
 }
 
-/* A section on Today: its start/stop tiles, then its one-tap buttons. */
-.today-group {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 /* ===================== Today: start/stop tiles ===================== */
 
-/* Dense, so the half-width tiles fill in around the full-row ones with levels, rather than leave holes. Nothing
-   changes size when an episode starts or stops, so the layout stays put. */
-.episode-grid {
+/* A heading's trackers, two to a row, in exactly the order they were arranged in: start/stop tiles and one-tap
+   buttons alike. Not dense, so a half-width one just before a full row keeps its row to itself, if that's where
+   it was put. Nothing changes size when an episode starts or stops, so the layout stays put. */
+.today-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  grid-auto-flow: dense;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+/* Under the last heading, out of the way: changes the order, not what's logged. */
+.arrange-link {
+  align-self: flex-end;
+  margin-top: -14px;
 }
 
 /* At rest: flat, outlined in the tracker's color. The outline is as thick at rest as running, so a tile is the
@@ -646,6 +646,16 @@ textarea {
   height: auto;
 }
 
+/* Read out, not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .color-dot {
   width: 10px;
   height: 10px;
@@ -693,34 +703,177 @@ textarea {
 
 /* ===================== Today: moments ===================== */
 
-.moment-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-/* A pill, not a tile, with a "+" before the name: one tap adds one, nothing to stop. */
+/* Half a row like a start/stop tile, but with round ends, and a "+" where the tile has its ring: one tap adds
+   one, nothing to stop. The name and "+" sit where a tile's name and ring do, so side by side they line up. */
 .moment-button {
-  border: 1.5px solid var(--rest-line);
+  border: 2px solid var(--rest-line);
   background: var(--surface);
   color: var(--deep);
   border-radius: 999px;
-  padding: 11px 18px 11px 14px;
-  min-height: 48px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  padding: 12px 18px;
+  min-height: 52px;
+  text-align: left;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  column-gap: 8px;
+  min-width: 0;
 }
 
 .moment-button:active {
   background: var(--tint);
 }
 
-.moment-plus {
-  font-size: 1.15rem;
-  line-height: 1;
-  margin-right: -2px;
+.moment-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+/* ===================== Today: arranging ===================== */
+
+/* Kept clear of the bar at the bottom. */
+#view-today.is-arranging {
+  padding-bottom: 76px;
+}
+
+/* At the bottom, above the tabs, within reach of a thumb: what to do, the picked tracker's arrows, and Done. */
+.arrange-bar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  width: min(560px, calc(100% - 32px));
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: 16px;
+  padding: 8px 8px 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 5;
+  box-shadow: 0 6px 20px rgb(0 0 0 / .18);
+}
+
+.arrange-hint {
+  flex: 1 1 auto;
+  font-size: .92rem;
+  min-width: 0;
+}
+
+.arrange-hint b {
+  font-size: 1.05rem;
+}
+
+.arrange-bar .button.primary {
+  background: var(--bg);
+  color: var(--ink);
+  border-color: var(--bg);
+  min-height: 44px;
+}
+
+.arrange-arrow {
+  border: 1.5px solid color-mix(in srgb, var(--bg) 45%, transparent);
+  background: none;
+  color: var(--bg);
+  border-radius: 12px;
+  width: 48px;
+  height: 44px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  flex: none;
+}
+
+/* A heading's own up and down, beside it. */
+.heading-moves {
+  display: flex;
+  gap: 6px;
+}
+
+.heading-moves button {
+  border: 1.5px solid var(--outline);
+  background: var(--tab);
+  color: var(--ink);
+  border-radius: 12px;
+  width: 44px;
+  height: 40px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+/* Something to drop on, once a heading's last tile has been dragged out. */
+.arrange-grid {
+  min-height: 52px;
+}
+
+/* A tracker as it sits on Today, as wide and the same shape, with a grip. A short press lifts it, so the page
+   still scrolls under a quick swipe; nothing on it is logged. */
+.arrange-tile {
+  border: 2px dashed var(--rest-line);
+  background: var(--surface);
+  color: var(--deep);
+  border-radius: 18px;
+  padding: 12px 13px;
+  min-height: 74px;
+  min-width: 0;
+  text-align: left;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  column-gap: 8px;
+  cursor: grab;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.arrange-tile.is-running {
+  background: var(--tint);
+  color: var(--ink);
+}
+
+.arrange-tile.is-moment {
+  border-radius: 999px;
+  padding-inline: 18px;
+  min-height: 52px;
+}
+
+.arrange-tile.is-wide {
+  grid-column: 1 / -1;
+}
+
+.arrange-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.arrange-grip {
+  height: 1.47rem; /* the name's line height, so it sits level with it */
+  opacity: .8;
+}
+
+/* Tapped, to move with the arrows: solid and raised. */
+.arrange-tile.is-picked {
+  border-style: solid;
+  border-color: var(--ink);
+  box-shadow: 0 3px 0 var(--ink);
+}
+
+/* Where the dragged tile will land. */
+.arrange-tile.is-placeholder {
+  opacity: .35;
+}
+
+/* The tile in hand. */
+.arrange-tile.is-lifted {
+  width: 100%;
+  height: 100%;
+  border-style: solid;
+  cursor: grabbing;
+  box-shadow: 0 10px 24px rgb(0 0 0 / .22);
+  transform: scale(1.03);
 }
 
 /* ===================== Today: one day ===================== */

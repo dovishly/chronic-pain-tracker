@@ -254,6 +254,28 @@ export const moveTracker = safely(async (id: string, direction: -1 | 1) => {
   await saveTrackers([{ ...tracker, sort_order: newSortOrder }, { ...neighbor, sort_order: tracker.sort_order }]);
 });
 
+/** Headings in order, each with its trackers' ids in order: how Today is arranged. */
+export type Layout = [group: string, trackerIds: string[]][];
+
+/**
+ * Saves how Today was arranged. Its trackers take the places in the list they held between them, in the new
+ * order, so the check-in trackers stay where they were. A tracker moved under another heading takes its name.
+ */
+export const arrangeToday = safely(async (layout: Layout) => {
+  const groupOf = new Map(layout.flatMap(([group, ids]) => ids.map(id => [id, group] as const)));
+  const newOrder = layout.flatMap(([, ids]) => ids);
+  let next = 0;
+  const order = activeTrackers(data()).map(t => (groupOf.has(t.id) ? trackerById(newOrder[next++]) : t));
+  const changed = order.flatMap((tracker, i) => {
+    const sort_order = (i + 1) * 10;
+    const group = groupOf.get(tracker.id);
+    // Unchanged when it stays put, so a tracker without a heading keeps none rather than becoming "Other".
+    const group_name = group === undefined || group === groupName(tracker) ? tracker.group_name : group;
+    return tracker.sort_order === sort_order && tracker.group_name === group_name ? [] : [{ ...tracker, sort_order, group_name }];
+  });
+  await saveTrackers(changed);
+});
+
 /* ---------- starting over ---------- */
 
 /** Erases this phone's data and connection, then reopens with the starter trackers. Supabase is left as it is. */
