@@ -26,9 +26,8 @@ Your tracker names and entries are stored on your device or in your own Supabase
 
 ## What you'll set up
 
-1. **Supabase** (free, optional): your private database, so your entries sync between devices and have a copy online.
-2. **GitHub Pages** (free): hosts the app's files.
-3. **Your phone:** add the app to your Home Screen and sign in.
+1. **Supabase** (optional): your private database, so your entries sync between devices and have a copy online.
+2. **Your phone:** add the app to your Home Screen and sign in.
 
 ---
 
