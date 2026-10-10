@@ -1,13 +1,12 @@
 import { useNow, useData } from '../../hooks';
 import { formatDuration } from '../../lib/util';
-import {
-  activeTrackers, groupTrackers, isWide, runningEpisodes, todayRows, type RunningEpisode, type Tracker,
-} from '../../lib/model';
+import { runningEpisodes, type RunningEpisode, type Tracker } from '../../lib/model';
+import { isWide, todayGroups } from '../../lib/layout';
 import { logLevel, logMoment, startAtLevel, toggleEpisode } from '../../lib/actions';
 import { colorStyle } from '../../components/color';
 import { CheckIcon } from '../../components/icons';
 import { AddLink } from '../../components/AddLink';
-import type { NewTrackerRequest } from '../settings/SettingsView';
+import type { NewTrackerRequest } from '../../navigation';
 import { DaySection } from './DaySection';
 import { ArrangeToday } from './ArrangeToday';
 
@@ -27,7 +26,7 @@ export function TodayView({ shownDay, onShowDay, onAddTracker, arranging, onArra
   const running = runningEpisodes(data);
   // Under the headings the person gave them, in the rows they put them in: start/stop tiles and one-tap buttons
   // side by side.
-  const groups = groupTrackers(activeTrackers(data, 'episode', 'moment'));
+  const groups = todayGroups(data);
 
   if (arranging && groups.length) {
     return (
@@ -41,7 +40,7 @@ export function TodayView({ shownDay, onShowDay, onAddTracker, arranging, onArra
     <section id="view-today" className="stack spacious">
       {groups.length ? (
         <>
-          {groups.map(([group, trackers], g) => (
+          {groups.map(([group, rows], g) => (
             <section key={group}>
               <div className="row-between section-header">
                 <h2>{group}</h2>
@@ -53,7 +52,7 @@ export function TodayView({ shownDay, onShowDay, onAddTracker, arranging, onArra
                 )}
               </div>
               <div className="today-grid">
-                {todayRows(trackers).flatMap(row => row.map((tracker, i) => (tracker.type === 'episode'
+                {rows.flatMap(row => row.map((tracker, i) => (tracker.type === 'episode'
                   ? <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} startsRow={i === 0} />
                   : <MomentButton key={tracker.id} tracker={tracker} startsRow={i === 0} />)))}
               </div>

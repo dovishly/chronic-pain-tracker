@@ -1,12 +1,13 @@
 // Sync with the owner's Supabase project. This is the only code that talks to it.
-// Local changes wait in the outbox (IndexedDB) until they're uploaded; changes made on other devices are
+// Local changes wait in the outbox (outbox.ts) until they're uploaded; changes made on other devices are
 // pulled in after a cursor. A sync runs on start, every minute, on focus, when back online, and shortly
 // after each change (see main.tsx and store.ts).
 import { createClient, type Session, type Subscription, type SupabaseClient } from '@supabase/supabase-js';
 import { createStore, prefs } from './util';
 import { db } from './db';
-import { trackers, entries, pendingKeys, dataChanged } from './data';
-import { normalizeEntry, normalizeTracker, type Entry, type Tracker } from './model';
+import { clearMemory, dataStore, putInMemory } from './data';
+import { outbox } from './outbox';
+import { normalizeEntry, normalizeTracker, type Entry, type Table, type Tracker } from './model';
 
 export type SyncStatus = 'local' | 'signedout' | 'syncing' | 'offline' | 'ok' | 'error' | 'needsChoice' | 'needsSchema';
 
@@ -21,11 +22,7 @@ export interface SyncState {
   lastSync: number | null;
 }
 
-export type Table = 'trackers' | 'entries';
 const TABLES: Table[] = ['trackers', 'entries']; // trackers first, so entries never point at a missing tracker
-
-/** A local change waiting to upload. updatedAt is the row's updated_at when queued, to tell if it changed since. */
-export interface OutboxItem { key: string; table: Table; updatedAt: string; row: Record<string, unknown> }
 
 interface Project { url: string; key: string } // project URL and anon/publishable key
 
@@ -62,7 +59,7 @@ function currentState(): SyncState {
     projectUrl: project?.url ?? null,
     signedIn: !!session,
     email: session?.user.email ?? null,
-    waiting: pendingKeys.size,
+    waiting: outbox.size(),
     lastSync: prefs.get<number>('lastSync'),
   };
 }
@@ -147,7 +144,7 @@ async function syncOnce(): Promise<void> {
   if (!(await schemaIsCurrent())) return setStatus('needsSchema'); // Settings → Sync shows how to update it
   if ((await db.getMeta<boolean>('needsLink')) && !(await linkAccount())) return setStatus('needsChoice');
   await flushOutbox();
-  if (await pullChanges()) dataChanged();
+  await pullChanges();
   prefs.set('lastSync', Date.now());
   setStatus('ok');
 }
@@ -170,13 +167,11 @@ async function schemaIsCurrent(): Promise<boolean> {
 async function linkAccount(): Promise<boolean> {
   const accountTrackers = await check(supabase().from('trackers').select('id').eq('deleted', false).limit(1));
   if (accountTrackers?.length) {
-    const hasOwnEntries = [...entries.values()].some(e => !e.deleted);
+    const hasOwnEntries = [...dataStore.get().entries.values()].some(e => !e.deleted);
     if (hasOwnEntries && !(await db.getMeta<boolean>('replaceConfirmed'))) return false;
-    for (const store of ['trackers', 'entries', 'outbox'] as const) await db.clear(store);
-    trackers.clear();
-    entries.clear();
-    pendingKeys.clear();
-    dataChanged();
+    for (const store of ['trackers', 'entries'] as const) await db.clear(store);
+    await outbox.clear();
+    clearMemory();
     await resetCursors();
   }
   await db.setMeta('needsLink', false);
@@ -186,28 +181,21 @@ async function linkAccount(): Promise<boolean> {
 
 /** Uploads waiting changes. An item leaves the outbox only if it wasn't changed again while being sent. */
 async function flushOutbox(): Promise<void> {
-  const items = await db.all<OutboxItem>('outbox');
+  const items = await outbox.all();
   for (const table of TABLES) {
     const waiting = items.filter(item => item.table === table);
     for (let i = 0; i < waiting.length; i += UPLOAD_BATCH) {
       const batch = waiting.slice(i, i + UPLOAD_BATCH);
       await check(supabase().from(table).upsert(batch.map(item => item.row)));
-      for (const item of batch) {
-        const current = await db.get<OutboxItem>('outbox', item.key);
-        if (current?.updatedAt === item.updatedAt) {
-          await db.remove('outbox', item.key);
-          pendingKeys.delete(item.key);
-        }
-      }
+      await outbox.remove(batch);
     }
   }
 }
 
 const cursorKey = (table: Table) => 'cursor:' + table;
 
-/** Downloads rows changed since the last pull. Returns true if anything on this device changed. */
-async function pullChanges(): Promise<boolean> {
-  let changed = false;
+/** Downloads rows changed since the last pull. */
+async function pullChanges(): Promise<void> {
   for (const table of TABLES) {
     let cursor = await db.getMeta<Cursor>(cursorKey(table));
     let rows: Record<string, unknown>[];
@@ -215,7 +203,7 @@ async function pullChanges(): Promise<boolean> {
       let query = supabase().from(table).select('*');
       if (cursor) query = query.or(`updated_at.gt.${cursor.updatedAt},and(updated_at.eq.${cursor.updatedAt},id.gt.${cursor.id})`);
       rows = (await check(query.order('updated_at').order('id').limit(PULL_PAGE))) ?? [];
-      if (await takeIn(table, rows)) changed = true;
+      await takeIn(table, rows);
       if (rows.length) {
         const last = rows[rows.length - 1];
         cursor = { updatedAt: String(last.updated_at), id: String(last.id) };
@@ -223,20 +211,19 @@ async function pullChanges(): Promise<boolean> {
       }
     } while (rows.length === PULL_PAGE);
   }
-  return changed;
 }
 
-/** Keeps pulled rows, except ones this device already has or has a change of its own to. Returns how many it kept. */
-async function takeIn(table: Table, rows: Record<string, unknown>[]): Promise<number> {
-  const inMemory: Map<string, Tracker | Entry> = table === 'trackers' ? trackers : entries;
+/** Keeps pulled rows, except ones this device already has or has a change of its own to. */
+async function takeIn(table: Table, rows: Record<string, unknown>[]): Promise<void> {
+  const inMemory: ReadonlyMap<string, Tracker | Entry> = dataStore.get()[table];
   const normalize = table === 'trackers' ? normalizeTracker : normalizeEntry;
   const fresh = rows
-    .filter(row => !pendingKeys.has(`${table}:${row.id}`)) // the local change wins until it's uploaded
+    .filter(row => !outbox.has(table, String(row.id))) // the local change wins until it's uploaded
     .filter(row => inMemory.get(String(row.id))?.updated_at !== row.updated_at)
     .map(row => normalize(row));
-  for (const item of fresh) inMemory.set(item.id, item);
-  if (fresh.length) await db.putMany(table, fresh);
-  return fresh.length;
+  if (!fresh.length) return;
+  putInMemory(table, fresh);
+  await db.putMany(table, fresh);
 }
 
 async function resetCursors(): Promise<void> {
@@ -305,7 +292,7 @@ async function signOut(): Promise<void> {
   signingOut = true;
   try {
     const { error } = await supabase().auth.signOut();
-    // supabase-js forgets the session even when the server call fails, and then this phone is signed out all the same.
+    // supabase-js forgets the session even when the server call fails, and then this device is signed out all the same.
     if (error && session) throw error;
   } finally {
     signingOut = false;
@@ -346,7 +333,7 @@ async function disconnect(): Promise<void> {
 }
 
 /**
- * Marks every tracker and entry in the account deleted, including ones this phone hasn't downloaded yet; the
+ * Marks every tracker and entry in the account deleted, including ones this device hasn't downloaded yet; the
  * triggers in schema.sql wipe what they held. Trackers go first: an entry whose tracker is deleted counts as
  * deleted, so once they're done, so is the reset.
  */

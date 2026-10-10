@@ -17,6 +17,7 @@ let opening: Promise<IDBDatabase> | null = null;
 function open(): Promise<IDBDatabase> {
   if (opening) return opening;
   opening = new Promise((resolve, reject) => {
+    // "logbook" is Log Lightly's former name, kept so what devices have saved still opens.
     const request = indexedDB.open('logbook', UPGRADES.length);
     request.onupgradeneeded = event => {
       for (let version = event.oldVersion; version < UPGRADES.length; version++) {
@@ -37,22 +38,29 @@ function open(): Promise<IDBDatabase> {
   return opening;
 }
 
-/** Runs fn(objectStore) in a transaction and resolves with fn's result once the transaction commits. */
+/**
+ * Runs fn in one transaction over the named stores, and resolves with fn's result once the transaction commits.
+ * If any write in it fails, none of them are saved.
+ */
 async function inTransaction<T>(
-  storeName: StoreName,
+  storeNames: StoreName[],
   mode: IDBTransactionMode,
-  fn: (store: IDBObjectStore) => T | Promise<T>,
+  fn: (transaction: IDBTransaction) => T | Promise<T>,
 ): Promise<T> {
   const database = await open();
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(storeName, mode);
+    const transaction = database.transaction(storeNames, mode);
     let result: T;
-    Promise.resolve(fn(transaction.objectStore(storeName))).then(value => { result = value; });
+    Promise.resolve(fn(transaction)).then(value => { result = value; });
     transaction.oncomplete = () => resolve(result);
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error);
   });
 }
+
+/** Runs fn(objectStore) in a transaction of its own. */
+const inStore = <T>(storeName: StoreName, mode: IDBTransactionMode, fn: (store: IDBObjectStore) => T | Promise<T>) =>
+  inTransaction([storeName], mode, transaction => fn(transaction.objectStore(storeName)));
 
 /** Turns an IDBRequest into a promise for its result. */
 const settled = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
@@ -61,16 +69,34 @@ const settled = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) 
 });
 
 export const db = {
-  all: <T>(storeName: StoreName) => inTransaction(storeName, 'readonly', store => settled(store.getAll() as IDBRequest<T[]>)),
-  get: <T>(storeName: StoreName, key: string) => inTransaction(storeName, 'readonly', store => settled(store.get(key) as IDBRequest<T | undefined>)),
-  put: (storeName: StoreName, value: unknown) => inTransaction(storeName, 'readwrite', store => { store.put(value); }),
-  putMany: (storeName: StoreName, values: unknown[]) => inTransaction(storeName, 'readwrite', store => { values.forEach(v => store.put(v)); }),
-  remove: (storeName: StoreName, key: string) => inTransaction(storeName, 'readwrite', store => { store.delete(key); }),
-  clear: (storeName: StoreName) => inTransaction(storeName, 'readwrite', store => { store.clear(); }),
+  all: <T>(storeName: StoreName) => inStore(storeName, 'readonly', store => settled(store.getAll() as IDBRequest<T[]>)),
+  putMany: (storeName: StoreName, values: unknown[]) => inStore(storeName, 'readwrite', store => { values.forEach(v => store.put(v)); }),
+  clear: (storeName: StoreName) => inStore(storeName, 'readwrite', store => { store.clear(); }),
+
+  /** Puts values into several stores in one transaction: all of them are saved, or none are. */
+  putTogether: (values: Partial<Record<StoreName, unknown[]>>) =>
+    inTransaction(Object.keys(values) as StoreName[], 'readwrite', transaction => {
+      for (const [storeName, items] of Object.entries(values)) items?.forEach(v => transaction.objectStore(storeName).put(v));
+    }),
+
+  /** Removes each key whose stored value passes test, in one transaction. Resolves with the keys it removed. */
+  removeIf: <T>(storeName: StoreName, keys: string[], test: (value: T | undefined, key: string) => boolean) =>
+    inStore(storeName, 'readwrite', store => {
+      const removed: string[] = [];
+      for (const key of keys) {
+        const request = store.get(key) as IDBRequest<T | undefined>;
+        request.onsuccess = () => {
+          if (!test(request.result, key)) return;
+          store.delete(key);
+          removed.push(key);
+        };
+      }
+      return removed;
+    }),
 
   async getMeta<T>(key: string): Promise<T | null> {
-    const record = await inTransaction('meta', 'readonly', store => settled(store.get(key) as IDBRequest<{ key: string; value: T } | undefined>));
+    const record = await inStore('meta', 'readonly', store => settled(store.get(key) as IDBRequest<{ key: string; value: T } | undefined>));
     return record ? record.value : null;
   },
-  setMeta: (key: string, value: unknown) => inTransaction('meta', 'readwrite', store => { store.put({ key, value }); }),
+  setMeta: (key: string, value: unknown) => inStore('meta', 'readwrite', store => { store.put({ key, value }); }),
 };

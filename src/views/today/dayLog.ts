@@ -6,17 +6,11 @@
 //   - at the Now row at the top of today, while it's still running;
 //   - off the top, on an earlier day that it carried on past.
 // Episodes that overlap get lanes side by side; ones that don't can share a lane.
-import { MINUTE_MS, formatTime, groupBy } from '../../lib/util';
+import { MINUTE_MS, formatTime, groupBy, type DayBounds } from '../../lib/util';
 import { checkinKey, entryTime, type Data, type Entry, type Episode } from '../../lib/model';
 
 /** Rows further apart than this get a divider showing the gap. */
 const GAP_MS = 60 * MINUTE_MS;
-
-/** A day's bounds in ms. Not always 24 hours apart: 23 or 25 on the days the clocks change. */
-export interface DayBounds {
-  from: number;
-  to: number;
-}
 
 export type Row =
   | { type: 'entry'; key: string; time: number; entry: Entry; nested?: boolean } // nested: under its open check-in

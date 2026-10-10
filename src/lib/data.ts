@@ -1,15 +1,26 @@
-// The trackers and entries on this device, held in memory (IndexedDB is the durable copy, see store.ts).
-// store.ts and sync.ts change the maps in place and then call dataChanged(), which gives components a
-// new snapshot so React re-renders. Components read it with useData() in hooks.ts.
+// The trackers and entries on this device, held in memory (IndexedDB is the durable copy, see store.ts). They
+// change only through putInMemory() and clearMemory(), which give components a new snapshot so React re-renders.
+// Components read it with useData() in hooks.ts.
 import { createStore } from './util';
-import type { Data, Entry, Tracker } from './model';
+import type { Data, Entry, Table, Tables, Tracker } from './model';
 
-export const trackers = new Map<string, Tracker>();
-export const entries = new Map<string, Entry>();
-
-/** Outbox keys ("table:id") of local changes the server hasn't confirmed yet. Mirrors the outbox store. */
-export const pendingKeys = new Set<string>();
+const trackers = new Map<string, Tracker>();
+const entries = new Map<string, Entry>();
+const maps: { [T in Table]: Map<string, Tables[T]> } = { trackers, entries };
 
 export const dataStore = createStore<Data>({ trackers, entries });
 
-export const dataChanged = () => dataStore.set({ trackers, entries });
+const changed = () => dataStore.set({ trackers, entries });
+
+/** Adds trackers or entries, or replaces them by id. */
+export function putInMemory<T extends Table>(table: T, items: Tables[T][]): void {
+  for (const item of items) maps[table].set(item.id, item);
+  changed();
+}
+
+/** Forgets every tracker and entry, for a device taking on an account's data. */
+export function clearMemory(): void {
+  trackers.clear();
+  entries.clear();
+  changed();
+}

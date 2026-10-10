@@ -5,7 +5,7 @@ import { CHECKIN_TYPES, activeTrackers, groupTrackers, type Tracker } from '../l
 import { saveCheckin, type Answer } from '../lib/actions';
 import { colorStyle } from '../components/color';
 import { AddLink } from '../components/AddLink';
-import type { NewTrackerRequest } from './settings/SettingsView';
+import type { NewTrackerRequest } from '../navigation';
 
 export interface CheckinDraft {
   answers: Record<string, Answer>; // trackerId -> answer

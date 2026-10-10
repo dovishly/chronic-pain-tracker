@@ -21,6 +21,15 @@ export function dayStart(key: string): number {
 /** The day after a "YYYY-MM-DD" day. (30 h past midnight is always the next day, even across DST changes.) */
 export const nextDay = (key: string) => dayKey(dayStart(key) + 30 * 60 * MINUTE_MS);
 
+/** A day's bounds in ms. Not always 24 hours apart: 23 or 25 on the days the clocks change. */
+export interface DayBounds {
+  from: number;
+  to: number;
+}
+
+/** From midnight at the start of a "YYYY-MM-DD" day to the next midnight. */
+export const dayBounds = (key: string): DayBounds => ({ from: dayStart(key), to: dayStart(nextDay(key)) });
+
 /** "Today", "Yesterday", or a short date like "Mon, Sep 29". */
 export function dayLabel(key: string): string {
   if (key === dayKey(Date.now())) return 'Today';
@@ -119,7 +128,10 @@ export function uuid(): string {
 
 /* ---------- preferences ---------- */
 
-/** Small settings kept as JSON in localStorage under "logbook.<name>". Storage can be unavailable (private browsing). */
+/**
+ * Small settings kept as JSON in localStorage under "logbook.<name>" (Log Lightly's former name, kept so saved
+ * settings still load). Storage can be unavailable (private browsing).
+ */
 export const prefs = {
   /** The localStorage key for a setting. */
   key: (name: string) => 'logbook.' + name,

@@ -6,6 +6,7 @@ import {
   CHECKIN_TYPES, activeTrackers, allEpisodes, byTime, deletedEntry, deletedTracker, entryTime, groupName, isStartOrEnd,
   levelLabel, newEntry, runningEpisodes, type Entry, type EntryKind, type Episode, type Tracker,
 } from './model';
+import { arrangedTrackers, type Layout } from './layout';
 import { addStarterTrackers, eraseDevice, saveEntries, saveTrackers } from './store';
 import { sync } from './sync';
 import { toast, safely } from './toast';
@@ -21,15 +22,24 @@ async function addEntry(trackerId: string, kind: EntryKind, fields?: Partial<Ent
   return entry;
 }
 
+/** A toast about an entry just logged or moved, offering to move it earlier or take it back. */
+function entryToast(message: string, id: string): void {
+  toast(message, [
+    { label: '−5 min', run: () => moveEntryEarlier(id, 5) },
+    { label: '−15 min', run: () => moveEntryEarlier(id, 15) },
+    { label: 'Undo', run: () => deleteEntry(id, 'Removed') },
+  ]);
+}
+
 export const toggleEpisode = safely(async (trackerId: string) => {
   const tracker = trackerById(trackerId);
   const running = runningEpisodes(data()).get(trackerId);
   if (running) {
     const end = await addEntry(trackerId, 'end');
-    toast(`${tracker.name} ended · ${formatDuration(entryTime(end) - running.since)}`, end.id);
+    entryToast(`${tracker.name} ended · ${formatDuration(entryTime(end) - running.since)}`, end.id);
   } else {
     const start = await addEntry(trackerId, 'start');
-    toast(`${tracker.name} started ${formatTime(entryTime(start))}`, start.id);
+    entryToast(`${tracker.name} started ${formatTime(entryTime(start))}`, start.id);
   }
 });
 
@@ -38,7 +48,7 @@ export const logLevel = safely(async (trackerId: string, level: number) => {
   const tracker = trackerById(trackerId);
   const label = levelLabel(tracker, level) ?? String(level);
   const entry = await addEntry(trackerId, 'level', { value: level, text: label });
-  toast(`${tracker.name}: ${label}`, entry.id);
+  entryToast(`${tracker.name}: ${label}`, entry.id);
 });
 
 /** Starts an episode at a level (1-based), in one tap: a start and a level at the same moment. */
@@ -47,7 +57,7 @@ export const startAtLevel = safely(async (trackerId: string, level: number) => {
   const label = levelLabel(tracker, level) ?? String(level);
   const start = newEntry(trackerId, 'start');
   await saveEntries([start, newEntry(trackerId, 'level', { value: level, text: label, occurred_at: start.occurred_at })]);
-  toast(`${tracker.name} started ${formatTime(entryTime(start))} · ${label}`, start.id);
+  entryToast(`${tracker.name} started ${formatTime(entryTime(start))} · ${label}`, start.id);
 });
 
 /** Levels logged at the very moment a start was (by startAtLevel): they go with it when it's moved or undone. */
@@ -60,7 +70,7 @@ function levelsAtStart(start: Entry): Entry[] {
 export const logMoment = safely(async (trackerId: string) => {
   const tracker = trackerById(trackerId);
   const entry = await addEntry(trackerId, 'moment');
-  toast(`${tracker.name} at ${formatTime(entryTime(entry))}`, entry.id);
+  entryToast(`${tracker.name} at ${formatTime(entryTime(entry))}`, entry.id);
 });
 
 /* ---------- changing what was logged ---------- */
@@ -106,13 +116,13 @@ export const moveEntryEarlier = safely(async (id: string, minutes: number) => {
   if (episode && entryTime(moved[0]) <= episode.start) moved = [earlier(data().entries.get(episode.id)!), moved[0]];
 
   if (reordersEpisodes(moved)) {
-    toast(overlapMessage(entry.tracker_id), id);
+    entryToast(overlapMessage(entry.tracker_id), id);
     return;
   }
   await saveEntries([...moved, ...levelsAtStart(entry).map(earlier)]);
   const [from, to] = moved.map(entryTime);
   const name = trackerById(entry.tracker_id).name;
-  toast(moved.length === 1 ? `Moved to ${formatTime(from)}` : `Moved ${name} to ${formatTime(from)}–${formatTime(to)}`, id);
+  entryToast(moved.length === 1 ? `Moved to ${formatTime(from)}` : `Moved ${name} to ${formatTime(from)}–${formatTime(to)}`, id);
 });
 
 /** An entry's time ("HH:MM" on its own day, or "" to keep it) and note. Returns whether it saved. */
@@ -130,7 +140,7 @@ export const editEntry = safely(async (id: string, time: string, note: string) =
 
 /**
  * An episode's start and end times ("HH:MM", each on its own day) and its note. The note is kept on the start;
- * the editor also shows an end's note (say, from another phone), so saving moves that to the start.
+ * the editor also shows an end's note (say, from another device), so saving moves that to the start.
  * Returns whether it saved.
  */
 export const editEpisode = safely(async (episode: Episode, startTime: string, endTime: string, note: string) => {
@@ -254,44 +264,21 @@ export const moveTracker = safely(async (id: string, direction: -1 | 1) => {
   await saveTrackers([{ ...tracker, sort_order: newSortOrder }, { ...neighbor, sort_order: tracker.sort_order }]);
 });
 
-/** Headings in order, each with its rows of trackers' ids: how Today is arranged. */
-export type Layout = [group: string, rows: string[][]][];
-
-/**
- * Saves how Today was arranged. Its trackers take the places in the list they held between them, in the new
- * order, so the check-in trackers stay where they were. A tracker moved under another heading takes its name,
- * and each one that begins a row (after a heading's first) is marked to, so the rows come back as they were left.
- */
+/** Saves how Today was arranged (see arrangedTrackers() in layout.ts). */
 export const arrangeToday = safely(async (layout: Layout) => {
-  const placed = new Map(layout.flatMap(([group, rows]) =>
-    rows.flatMap((row, r) => row.map((id, i) => [id, { group, newRow: r > 0 && i === 0 }] as const))));
-  const newOrder = layout.flatMap(([, rows]) => rows.flat());
-  let next = 0;
-  const order = activeTrackers(data()).map(t => (placed.has(t.id) ? trackerById(newOrder[next++]) : t));
-  const changed = order.flatMap((tracker, i) => {
-    const sort_order = (i + 1) * 10;
-    const place = placed.get(tracker.id);
-    if (!place) return tracker.sort_order === sort_order ? [] : [{ ...tracker, sort_order }];
-    // Unchanged when it stays put, so a tracker without a heading keeps none rather than becoming "Other".
-    const group_name = place.group === groupName(tracker) ? tracker.group_name : place.group;
-    const { new_row, ...config } = tracker.config;
-    const sameRow = !!new_row === place.newRow;
-    if (tracker.sort_order === sort_order && tracker.group_name === group_name && sameRow) return [];
-    return [{ ...tracker, sort_order, group_name, config: sameRow ? tracker.config : place.newRow ? { ...config, new_row: true } : config }];
-  });
-  await saveTrackers(changed);
+  await saveTrackers(arrangedTrackers(data(), layout));
 });
 
 /* ---------- starting over ---------- */
 
-/** Erases this phone's data and connection, then reopens with the starter trackers. Supabase is left as it is. */
+/** Erases this device's data and connection, then reopens with the starter trackers. Supabase is left as it is. */
 export const resetDevice = safely(async () => {
   await sync.disconnect();
   await eraseDevice();
   location.reload();
 });
 
-/** Deletes everything in the account and on this phone, and starts again with the starter trackers. */
+/** Deletes everything in the account and on this device, and starts again with the starter trackers. */
 export const resetEverywhere = safely(async () => {
   await sync.deleteAccountData();
   const { trackers, entries } = data();

@@ -1,8 +1,8 @@
-// Tracker colors. A tracker's color is a preset key, drawn with the CSS variable --c-<key> from styles.css
-// (with light and dark versions), or a custom "#rrggbb" from the editor's color picker, used as-is.
+// Tracker colors. A tracker's color is a preset key (COLORS in lib/model.ts), drawn with the CSS variable
+// --c-<key> from styles.css (with light and dark versions), or a custom "#rrggbb" from the editor's color picker,
+// used as-is.
 import type { CSSProperties } from 'react';
-
-export const COLORS = ['indigo', 'amber', 'teal', 'rose', 'violet', 'green', 'slate', 'sky'];
+import { COLORS } from '../lib/model';
 
 export const isCustomColor = (color: string) => /^#[0-9a-f]{6}$/i.test(color);
 

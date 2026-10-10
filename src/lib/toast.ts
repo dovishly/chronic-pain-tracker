@@ -1,10 +1,17 @@
-// The toast: one short message at the bottom of the screen. Any code can show one; <Toast> displays it.
+// The toast: one short message at the bottom of the screen, with buttons for what can be done about it. Any code
+// can show one; <Toast> displays it.
 import { createStore } from './util';
+
+/** A button on a toast. */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
 
 export interface ToastMessage {
   id: number;          // changes with every toast, so the same message twice still replays
   message: string;
-  entryId?: string;    // offers "−5 min", "−15 min" and "Undo" for this entry
+  actions: ToastAction[];
 }
 
 const TOAST_MS = 9000;
@@ -13,9 +20,9 @@ export const toastStore = createStore<ToastMessage | null>(null);
 let nextId = 1;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
-export function toast(message: string, entryId?: string): void {
+export function toast(message: string, actions: ToastAction[] = []): void {
   clearTimeout(timer);
-  toastStore.set({ id: nextId++, message, entryId });
+  toastStore.set({ id: nextId++, message, actions });
   timer = setTimeout(() => toastStore.set(null), TOAST_MS);
 }
 

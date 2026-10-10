@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Log Lightly">
     <script>
-      // Light or dark before the first paint: the one picked in Settings, else the phone's. See src/lib/theme.ts.
+      // Light or dark before the first paint: the one picked in Settings, else the device's. See src/lib/theme.ts.
       (function () {
         var picked = null;
         try { picked = JSON.parse(localStorage.getItem('logbook.theme')); } catch (e) {}

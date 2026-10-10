@@ -7,8 +7,8 @@
 :root {
   --bg: #E8ECE6;
   --surface: #F4F6F2;
-  --raised: #DCE2DA;
   /* quiet round buttons: sync, help, day arrows */
+  --raised: #DCE2DA;
   --tab: #E1E6DF;
   --ink: #1E2A24;
   --muted: #4F5C55;
@@ -16,15 +16,15 @@
   --line-strong: #8F9A91;
   --outline: #6F7B71;
   --dash: #C4CCC2;
-  --thumb: #FFFDF8;
   /* the picked level or choice, raised on its track */
+  --thumb: #FFFDF8;
   --thumb-edge: rgb(30 42 36 / .28);
-  --tab-on: var(--ink);
   /* the current tab */
+  --tab-on: var(--ink);
   --tab-on-text: var(--surface);
   --field: #FBFCFA;
-  --on: #FFFFFF;
   /* text on a tracker color */
+  --on: #FFFFFF;
   --danger: #B42318;
   --ok: #1E7B4A;
   --warn: #9A6200;
@@ -44,7 +44,7 @@
   --radius: 14px;
 }
 
-/* Dark: picked in Settings → Appearance, or the phone's mode (src/lib/theme.ts sets data-theme either way).
+/* Dark: picked in Settings → Appearance, or the device's mode (src/lib/theme.ts sets data-theme either way).
    The same room with the lights down: a neutral graphite rather than black, so the tracker colors are the only
    color, tiles a step lighter than the page, and softer tracker colors, so nothing glows. */
 :root[data-theme="dark"] {

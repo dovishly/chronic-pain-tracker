@@ -55,8 +55,8 @@ Your tracker names and entries are stored on your device and in your own Supabas
 
 ### Start over
 **Settings → Start over** goes back to the starter trackers with no entries.
-- **Reset this phone** erases everything on the phone, including your sign-in. What's already synced stays in Supabase. Connect and sign in again to get it back.
-- **Reset everywhere** (when signed in) deletes every tracker and entry in Supabase too, and your other phones follow at their next sync. It can't be undone.
+- **Reset this device** erases everything on it, including your sign-in. What's already synced stays in Supabase. Connect and sign in again to get it back.
+- **Reset everywhere** (when signed in) deletes every tracker and entry in Supabase too, and your other devices follow at their next sync. It can't be undone.
 ---
 
 ## Working on the code

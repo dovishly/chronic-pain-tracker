@@ -2,41 +2,15 @@ import { useState } from 'react';
 import { useData, useSyncState, useTheme } from '../../hooks';
 import { setTheme, type ThemeChoice } from '../../lib/theme';
 import { CheckIcon } from '../../components/icons';
-import { dayKey, dayLabel, uuid } from '../../lib/util';
-import { activeTrackers, defaultConfig, entryTime, liveEntries, type Data, type Tracker, type TrackerType } from '../../lib/model';
-import { COLORS } from '../../components/color';
+import { dayKey, dayLabel } from '../../lib/util';
+import { entryTime, liveEntries, newTracker, type Tracker } from '../../lib/model';
 import { exportBackup, exportForAnalysis } from '../../lib/export';
 import { resetDevice, resetEverywhere } from '../../lib/actions';
 import { safely } from '../../lib/toast';
+import type { NewTrackerRequest } from '../../navigation';
 import { TrackerEditor } from './TrackerEditor';
 import { ArchivedTrackers, TrackerList } from './TrackerList';
 import { SyncPanel } from './SyncPanel';
-
-/** A tracker to add, asked for from a section's "+ Add" on Today or Check in: its kind and heading. */
-export interface NewTrackerRequest {
-  type: TrackerType;
-  group: string;
-}
-
-/** A blank tracker, in a color that keeps it easy to tell apart from the others (see freshColor). */
-const newTracker = (data: Data, { type, group }: NewTrackerRequest = { type: 'episode', group: '' }): Tracker => ({
-  id: uuid(), name: '', type, group_name: group, color: freshColor(data, group),
-  config: defaultConfig(type), sort_order: 0, archived: false, deleted: false,
-});
-
-/** The color fewest trackers under this heading have (they sit side by side), then fewest of all trackers. */
-function freshColor(data: Data, group: string): string {
-  const trackers = activeTrackers(data);
-  const uses = (color: string) => [
-    trackers.filter(t => t.color === color && (t.group_name || '') === group).length,
-    trackers.filter(t => t.color === color).length,
-  ];
-  const fewer = (a: string, b: string) => {
-    const [[groupA, allA], [groupB, allB]] = [uses(a), uses(b)];
-    return groupA < groupB || (groupA === groupB && allA < allB);
-  };
-  return COLORS.reduce((best, color) => (fewer(color, best) ? color : best));
-}
 
 interface Props {
   /** Opens with a new tracker's editor, from "+ Add" on another tab; onAddDone takes the person back there. */
@@ -47,7 +21,7 @@ interface Props {
 export function SettingsView({ addRequest, onAddDone }: Props) {
   const data = useData();
   const [editing, setEditing] = useState<{ tracker: Tracker; isNew: boolean; fromAdd?: boolean } | null>(
-    () => (addRequest ? { tracker: newTracker(data, addRequest), isNew: true, fromAdd: true } : null),
+    () => (addRequest ? { tracker: newTracker(data, addRequest.type, addRequest.group), isNew: true, fromAdd: true } : null),
   );
   const closeEditor = () => {
     setEditing(null);
@@ -124,9 +98,9 @@ export function SettingsView({ addRequest, onAddDone }: Props) {
   );
 }
 
-const THEME_CHOICES: [ThemeChoice, string][] = [['phone', 'Match device'], ['light', 'Light'], ['dark', 'Dark']];
+const THEME_CHOICES: [ThemeChoice, string][] = [['device', 'Match device'], ['light', 'Light'], ['dark', 'Dark']];
 
-/** Light or dark, or whichever the phone is set to. Kept on this phone only. */
+/** Light or dark, or whichever the device is set to. Kept on this device only. */
 function Appearance() {
   const theme = useTheme();
   return (
@@ -149,7 +123,7 @@ function dataStats(times: number[]): string {
   return `${times.length} entries on this device, from ${dayLabel(dayKey(Math.min(...times)))}.`;
 }
 
-/** Back to the starter trackers: on this phone only, or (signed in) in the whole account. Each asks first. */
+/** Back to the starter trackers: on this device only, or (signed in) in the whole account. Each asks first. */
 function StartOver() {
   const { signedIn } = useSyncState();
   const [confirming, setConfirming] = useState<'device' | 'everywhere' | null>(null);

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useData } from '../../hooks';
 import {
-  TYPE_HELP, TYPE_LABELS, allTrackers, defaultConfig, liveEntries, trackerProblem,
+  COLORS, TYPE_HELP, TYPE_LABELS, allTrackers, defaultConfig, liveEntries, trackerProblem,
   type Tracker, type TrackerConfig, type TrackerType,
 } from '../../lib/model';
 import { archiveTracker, deleteTracker, saveTrackerEdit } from '../../lib/actions';
 import { unhandled } from '../../lib/util';
-import { COLORS, colorStyle, isCustomColor } from '../../components/color';
+import { colorStyle, isCustomColor } from '../../components/color';
 
 /** The type-specific settings as the form shows them: everything is text, lists are one item per line. */
 interface ConfigFields {
@@ -165,7 +165,7 @@ export function TrackerEditor({ tracker, isNew, onClose }: Props) {
               onClick={() => setColor(c)}
             />
           ))}
-          {/* The phone's own color picker, behind a rainbow swatch that shows the color once picked. */}
+          {/* The device's own color picker, behind a rainbow swatch that shows the color once picked. */}
           <label className={isCustomColor(color) ? 'custom-color is-selected' : 'custom-color'}
             style={isCustomColor(color) ? colorStyle(color) : undefined}>
             <input type="color" id="editor-custom-color" aria-label="Custom color"

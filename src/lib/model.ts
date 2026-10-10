@@ -1,6 +1,6 @@
 // The data model: trackers, entries, and what's derived from them (episodes, days, labels).
 // Field names on trackers and entries are the Supabase column names, so rows go to and from it as they are.
-import { dayKey, groupBy, nowIso, uuid, unhandled } from './util';
+import { dayKey, groupBy, nowIso, uuid, unhandled, type DayBounds } from './util';
 
 /* ---------- types ---------- */
 
@@ -25,13 +25,16 @@ export interface Tracker {
   name: string;
   type: TrackerType;
   group_name: string | null; // heading the tracker is listed under; null or '' means "Other"
-  color: string;          // a preset color key (COLORS in components/color.ts), or a custom "#rrggbb"
+  color: string;          // a preset color key (COLORS), or a custom "#rrggbb"
   config: TrackerConfig;
   sort_order: number;
   archived: boolean;
   deleted: boolean;       // soft delete, so deletions sync; its entries are deleted with it
   updated_at?: string;    // set on every local write; replaced by the server's on sync
 }
+
+/** The preset tracker colors, each drawn with --c-<key> from styles.css (see components/color.ts). */
+export const COLORS = ['indigo', 'amber', 'teal', 'rose', 'violet', 'green', 'slate', 'sky'];
 
 /**
  * start/end: an episode began or stopped. level: severity during an episode (value, with its label in text).
@@ -112,7 +115,15 @@ export const STARTER_TRACKERS: StarterTracker[] = [
   { name: 'Medication', type: 'moment', group_name: 'Moments', color: 'teal', config: {} },
 ];
 
-/* ---------- rows from IndexedDB or Supabase ---------- */
+/* ---------- rows to and from IndexedDB and Supabase ---------- */
+
+/** The Supabase tables, which are also IndexedDB stores, and what each one holds. */
+export interface Tables {
+  trackers: Tracker;
+  entries: Entry;
+}
+
+export type Table = keyof Tables;
 
 /** A tracker as stored, with defaults for fields that older rows lack and without server-only columns. */
 export function normalizeTracker(raw: Record<string, unknown>): Tracker {
@@ -125,6 +136,21 @@ export function normalizeEntry(raw: Record<string, unknown>): Entry {
   // Postgres numeric can arrive as a string.
   return { ...entry, value: entry.value == null ? null : Number(entry.value) } as Entry;
 }
+
+// Rows to upload have every column, even when empty: Supabase refuses a batch whose rows have different fields.
+// updated_at is left out because the server sets it.
+
+export type UploadRow = Record<string, unknown> & { id: string };
+
+export const trackerRow = (t: Tracker): UploadRow => ({
+  id: t.id, name: t.name, type: t.type, group_name: t.group_name ?? null, color: t.color,
+  config: t.config || {}, sort_order: t.sort_order || 0, archived: !!t.archived, deleted: !!t.deleted,
+});
+
+export const entryRow = (e: Entry): UploadRow => ({
+  id: e.id, tracker_id: e.tracker_id, occurred_at: e.occurred_at, kind: e.kind, value: e.value ?? null,
+  text: e.text ?? null, note: e.note ?? null, checkin_id: e.checkin_id ?? null, deleted: !!e.deleted,
+});
 
 /* ---------- deleting ---------- */
 
@@ -220,25 +246,28 @@ export const activeTrackers = (data: Data, ...types: TrackerType[]) =>
 
 export const groupName = (tracker: Tracker) => tracker.group_name || 'Other';
 
-/** A start/stop tracker with levels: a whole row on Today to itself, with its levels underneath. */
-export const isWide = (tracker: Tracker) => tracker.type === 'episode' && (tracker.config.levels || []).some(Boolean);
-
-/**
- * A heading's Today trackers in rows of up to two: a new row for one marked to start one, one with levels (which
- * has its row to itself), and once a row is full.
- */
-export function todayRows(trackers: Tracker[]): Tracker[][] {
-  const rows: Tracker[][] = [];
-  for (const tracker of trackers) {
-    const row = rows.at(-1);
-    if (!row || tracker.config.new_row || isWide(tracker) || isWide(row[0]) || row.length >= 2) rows.push([tracker]);
-    else row.push(tracker);
-  }
-  return rows;
-}
-
 /** [heading, trackers] pairs, in order of each heading's first tracker. */
 export const groupTrackers = (trackers: Tracker[]) => [...groupBy(trackers, groupName)];
+
+/** A blank tracker, in a color that keeps it easy to tell apart from the others (see freshColor). */
+export const newTracker = (data: Data, type: TrackerType = 'episode', group = ''): Tracker => ({
+  id: uuid(), name: '', type, group_name: group, color: freshColor(data, group),
+  config: defaultConfig(type), sort_order: 0, archived: false, deleted: false,
+});
+
+/** The color fewest trackers under this heading have (they sit side by side), then fewest of all trackers. */
+function freshColor(data: Data, group: string): string {
+  const trackers = activeTrackers(data);
+  const uses = (color: string) => [
+    trackers.filter(t => t.color === color && (t.group_name || '') === group).length,
+    trackers.filter(t => t.color === color).length,
+  ];
+  const fewer = (a: string, b: string) => {
+    const [[groupA, allA], [groupB, allB]] = [uses(a), uses(b)];
+    return groupA < groupB || (groupA === groupB && allA < allB);
+  };
+  return COLORS.reduce((best, color) => (fewer(color, best) ? color : best));
+}
 
 /** The label of a rating or severity level (1-based), or null if the tracker has none for it. */
 export const levelLabel = (tracker: Tracker, level: number) => (tracker.config.levels || [])[level - 1] || null;
@@ -314,4 +343,37 @@ export function runningEpisodes(data: Data): Map<string, RunningEpisode> {
     }
   }
   return running;
+}
+
+/* ---------- days ---------- */
+
+/** What a tracker adds up to on a day. */
+export interface TrackerTotal {
+  count: number; // episodes started that day, or moments logged
+  ms: number;    // how long its episodes ran within the day
+}
+
+/** What a day adds up to: each tracker's total, by tracker id, and how many check-ins. */
+export interface DayTotals {
+  trackers: Map<string, TrackerTotal>;
+  checkins: number;
+}
+
+/**
+ * What a day adds up to, from the entries logged in it and the episodes that ran during it. An episode counts on
+ * the day it started, and its time is split at midnight between the days it ran on. The day's totals on Today and
+ * the export's daily table both come from here, so they agree.
+ */
+export function dayTotals(day: DayBounds, entries: Entry[], episodes: Episode[]): DayTotals {
+  const trackers = new Map<string, TrackerTotal>();
+  const add = (trackerId: string, count: number, ms: number) => {
+    const total = trackers.get(trackerId) ?? { count: 0, ms: 0 };
+    trackers.set(trackerId, { count: total.count + count, ms: total.ms + ms });
+  };
+  for (const episode of episodes) {
+    const ms = Math.min(episode.end, day.to) - Math.max(episode.start, day.from);
+    if (ms >= 0) add(episode.trackerId, episode.start >= day.from && episode.start < day.to ? 1 : 0, ms);
+  }
+  for (const entry of entries) if (entry.kind === 'moment') add(entry.tracker_id, 1, 0);
+  return { trackers, checkins: new Set(entries.filter(e => e.kind === 'answer').map(checkinKey)).size };
 }

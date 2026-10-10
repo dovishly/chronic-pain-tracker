@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { dayKey, longDate } from './lib/util';
 import { useNow } from './hooks';
-import { TabBar, VIEW_TITLES, type View } from './components/TabBar';
+import { VIEW_TITLES, type NewTrackerRequest, type View } from './navigation';
+import { TabBar } from './components/TabBar';
 import { SyncPill } from './components/SyncPill';
 import { StorageHelp } from './components/StorageHelp';
 import { Toast } from './components/Toast';
 import { TodayView } from './views/today/TodayView';
 import { CheckinView, emptyCheckin, type CheckinDraft } from './views/CheckinView';
-import { SettingsView, type NewTrackerRequest } from './views/settings/SettingsView';
+import { SettingsView } from './views/settings/SettingsView';
 
 export function App() {
   const [view, setView] = useState<View>('today');

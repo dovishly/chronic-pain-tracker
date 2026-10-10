@@ -5,9 +5,9 @@
 //   entries   one row per entry, with the episode it belongs to and what else was running
 //   trackers  one row per tracker, with its settings
 // Times are local; *_utc columns are UTC.
-import { MINUTE_MS, clockTime, dayKey, dayStart, groupBy, nextDay, pad2, unhandled } from './util';
+import { MINUTE_MS, clockTime, dayBounds, dayKey, dayStart, groupBy, nextDay, pad2, unhandled } from './util';
 import {
-  allEpisodes, allTrackers, byTime, checkinKey, entryLabel, entryText, entryTime, liveEntries,
+  allEpisodes, allTrackers, byTime, checkinKey, dayTotals, entryLabel, entryText, entryTime, liveEntries,
   type Data, type Entry, type EntryKind, type Episode, type Tracker,
 } from './model';
 
@@ -343,15 +343,6 @@ function checkinsTable({ data, entries, trackers, names, runningAt }: Context): 
 
 /* ---------- daily ---------- */
 
-/** A figure per day per tracker: day -> tracker id -> amount. */
-type DayFigures = Map<string, Map<string, number>>;
-
-function addToDay(figures: DayFigures, day: string, trackerId: string, amount: number): void {
-  const perTracker = figures.get(day) ?? new Map<string, number>();
-  perTracker.set(trackerId, (perTracker.get(trackerId) ?? 0) + amount);
-  figures.set(day, perTracker);
-}
-
 function dailyTable({ entries, trackers, names, episodes, now }: Context): Table {
   // Every calendar day from the first entry to today, including days with nothing logged.
   const days: string[] = [];
@@ -360,17 +351,18 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
     for (let day = dayKey(entryTime(entries[0])); day <= today; day = nextDay(day)) days.push(day);
   }
   const entriesByDay = groupBy(entries, e => dayKey(entryTime(e)));
-
-  const startsByDay: DayFigures = new Map(); // episodes started
-  const msByDay: DayFigures = new Map();     // time episodes were running, clipped at midnight
+  const episodesByDay = new Map<string, Episode[]>(); // each episode under every day it ran on
   for (const episode of episodes) {
-    addToDay(startsByDay, dayKey(episode.start), episode.trackerId, 1);
     for (let day = dayKey(episode.start); day <= dayKey(episode.end); day = nextDay(day)) {
-      const from = Math.max(episode.start, dayStart(day));
-      const to = Math.min(episode.end, dayStart(nextDay(day)));
-      if (to >= from) addToDay(msByDay, day, episode.trackerId, to - from);
+      const onDay = episodesByDay.get(day);
+      if (onDay) onDay.push(episode);
+      else episodesByDay.set(day, [episode]);
     }
   }
+  // The same totals as Today shows for each day.
+  const totalsByDay = new Map(days.map(day =>
+    [day, dayTotals(dayBounds(day), entriesByDay.get(day) ?? [], episodesByDay.get(day) ?? [])]));
+  const totalOf = (day: string, trackerId: string) => totalsByDay.get(day)?.trackers.get(trackerId) ?? { count: 0, ms: 0 };
 
   const columns = ['date', 'weekday', 'checkins'];
   const cellsFor: ((day: string, dayEntries: Entry[]) => Cell)[] = [];
@@ -405,8 +397,8 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
         add(`${name} (text)`, (_, d) => joinText(mine(d, 'answer').map(e => e.text)));
         break;
       case 'episode': {
-        add(`${name} (episodes)`, day => startsByDay.get(day)?.get(tracker.id) ?? 0);
-        add(`${name} (minutes)`, day => Math.round((msByDay.get(day)?.get(tracker.id) ?? 0) / MINUTE_MS));
+        add(`${name} (episodes)`, day => totalOf(day, tracker.id).count);
+        add(`${name} (minutes)`, day => Math.round(totalOf(day, tracker.id).ms / MINUTE_MS));
         const hasLevels = (tracker.config.levels || []).length > 0
           || entries.some(e => e.tracker_id === tracker.id && e.kind === 'level');
         if (hasLevels) {
@@ -418,7 +410,7 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
         break;
       }
       case 'moment':
-        add(`${name} (count)`, (_, d) => mine(d, 'moment').length);
+        add(`${name} (count)`, day => totalOf(day, tracker.id).count);
         break;
       default:
         unhandled(tracker.type, null);
@@ -430,8 +422,7 @@ function dailyTable({ entries, trackers, names, episodes, now }: Context): Table
     columns,
     rows: days.map(day => {
       const dayEntries = entriesByDay.get(day) ?? [];
-      const checkins = new Set(dayEntries.filter(e => e.kind === 'answer').map(checkinKey));
-      return [day, weekday(dayStart(day)), checkins.size, ...cellsFor.map(cell => cell(day, dayEntries))];
+      return [day, weekday(dayStart(day)), totalsByDay.get(day)!.checkins, ...cellsFor.map(cell => cell(day, dayEntries))];
     }),
   };
 }

@@ -1,10 +1,4 @@
-export type View = 'today' | 'checkin' | 'settings';
-
-export const VIEW_TITLES: Record<View, string> = {
-  today: 'Today',
-  checkin: 'Check in',
-  settings: 'Settings',
-};
+import { VIEW_TITLES, type View } from '../navigation';
 
 export function TabBar({ current, onSelect }: { current: View; onSelect: (view: View) => void }) {
   return (

@@ -3,107 +3,13 @@ import {
   DndContext, DragOverlay, MouseSensor, TouchSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors,
   type DraggableSyntheticListeners,
 } from '@dnd-kit/core';
-import { activeTrackers, groupTrackers, isWide, todayRows, type Data, type Tracker } from '../../lib/model';
-import { arrangeToday, type Layout } from '../../lib/actions';
+import type { Data, Tracker } from '../../lib/model';
+import {
+  hasRoom, intoSpace, isWide, moveHeading, newRow, ownRow, placeOf, step, swap, todayLayout, type IsWide, type Layout,
+} from '../../lib/layout';
+import { arrangeToday } from '../../lib/actions';
 import { colorStyle } from '../../components/color';
-import type { NewTrackerRequest } from '../settings/SettingsView';
-
-/** Today's headings and their rows of trackers, as they show. */
-export const todayLayout = (data: Data): Layout =>
-  groupTrackers(activeTrackers(data, 'episode', 'moment'))
-    .map(([group, trackers]) => [group, todayRows(trackers).map(row => row.map(t => t.id))]);
-
-/* ---------- moves: each returns the new layout ---------- */
-
-type IsWide = (id: string) => boolean;
-interface Place { g: number; r: number; i: number }
-
-const GONE = ''; // where a moved tracker was, until tidy() takes it out
-
-const copy = (layout: Layout): Layout => layout.map(([group, rows]) => [group, rows.map(row => [...row])]);
-
-function placeOf(layout: Layout, id: string): Place {
-  for (const [g, [, rows]] of layout.entries()) {
-    for (const [r, row] of rows.entries()) if (row.includes(id)) return { g, r, i: row.indexOf(id) };
-  }
-  throw new Error(`${id} isn't on Today`);
-}
-
-/** Without the moved tracker's old place, emptied rows and emptied headings; one with levels on a row of its own. */
-function tidy(layout: Layout, wide: IsWide): Layout {
-  return layout
-    .map(([group, rows]): Layout[number] => [group, rows.flatMap(row => {
-      const tidied: string[][] = [];
-      for (const id of row.filter(id => id !== GONE)) {
-        const last = tidied.at(-1);
-        if (!last || wide(id) || wide(last[0]) || last.length >= 2) tidied.push([id]);
-        else last.push(id);
-      }
-      return tidied;
-    })])
-    .filter(([, rows]) => rows.length);
-}
-
-/** Two trackers trade places. */
-function swap(layout: Layout, a: string, b: string, wide: IsWide): Layout {
-  const next = copy(layout);
-  const [pa, pb] = [placeOf(next, a), placeOf(next, b)];
-  next[pa.g][1][pa.r][pa.i] = b;
-  next[pb.g][1][pb.r][pb.i] = a;
-  return tidy(next, wide);
-}
-
-/** Into the empty space beside the one tracker in row r. */
-function intoSpace(layout: Layout, id: string, g: number, r: number, wide: IsWide): Layout {
-  const next = copy(layout);
-  const from = placeOf(next, id);
-  next[from.g][1][from.r][from.i] = GONE;
-  next[g][1][r].push(id);
-  return tidy(next, wide);
-}
-
-/** On a row of its own, made at row r (0 for above the heading's first row). */
-function newRow(layout: Layout, id: string, g: number, r: number, wide: IsWide): Layout {
-  const next = copy(layout);
-  const from = placeOf(next, id);
-  next[from.g][1][from.r][from.i] = GONE;
-  next[g][1].splice(r, 0, [id]);
-  return tidy(next, wide);
-}
-
-/**
- * One place earlier (-1) or later (1), going through the empty spaces too: into a space, it moves there; onto a
- * tracker, they trade places. Into another heading, it's put on a row of its own, so no other tracker is moved out
- * of its heading. Null if there's nowhere to go.
- */
-function step(layout: Layout, id: string, direction: -1 | 1, wide: IsWide): Layout | null {
-  const from = placeOf(layout, id);
-  const places = layout.flatMap(([, rows], g) => rows.flatMap((row, r) =>
-    wide(row[0]) ? [{ g, r, id: row[0] }] : [{ g, r, id: row[0] }, { g, r, id: row[1] ?? null }]));
-  let k = places.findIndex(p => p.id === id) + direction;
-  // Past the space beside itself (it would stay put), and any space, for one with levels (it takes a whole row).
-  while (places[k] && places[k].id === null && (wide(id) || (places[k].g === from.g && places[k].r === from.r))) k += direction;
-  const to = places[k];
-  if (!to) return null;
-  if (to.id === null) return intoSpace(layout, id, to.g, to.r, wide);
-  if (to.g !== from.g) return newRow(layout, id, to.g, direction > 0 ? 0 : layout[to.g][1].length, wide);
-  return swap(layout, id, to.id, wide);
-}
-
-/** Off the row it shares, onto a new one just below. Null if it has a row to itself already. */
-function ownRow(layout: Layout, id: string, wide: IsWide): Layout | null {
-  const { g, r } = placeOf(layout, id);
-  return layout[g][1][r].length > 1 ? newRow(layout, id, g, r + 1, wide) : null;
-}
-
-/** A heading, with its trackers, one place up (-1) or down (1). */
-function moveHeading(layout: Layout, index: number, direction: -1 | 1): Layout {
-  const next = copy(layout);
-  [next[index], next[index + direction]] = [next[index + direction], next[index]];
-  return next;
-}
-
-/* ---------- the view ---------- */
+import type { NewTrackerRequest } from '../../navigation';
 
 interface Props {
   data: Data;
@@ -216,7 +122,7 @@ export function ArrangeToday({ data, running, onAddTracker, onDone }: Props) {
                     picked={picked === id} onPick={() => pick(id)}
                     onMove={direction => save(step(layout, id, direction, wide), id)} />
                 ))}
-                {row.length === 1 && !wide(row[0]) && <Space g={g} r={r} disabled={!!dragging && wide(dragging)} />}
+                {hasRoom(row, wide) && <Space g={g} r={r} disabled={!!dragging && wide(dragging)} />}
                 <Gap g={g} r={r + 1} />
               </Fragment>
             ))}

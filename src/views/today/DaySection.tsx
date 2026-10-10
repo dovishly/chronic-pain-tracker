@@ -2,13 +2,15 @@
 // Tapping a row opens it for editing; tapping a check-in shows its answers.
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { useData } from '../../hooks';
-import { dayKey, dayLabel, dayStart, formatDayTime, formatDuration, formatTime, groupBy, nextDay } from '../../lib/util';
 import {
-  allEpisodes, allTrackers, checkinKey, daysWithEntries, entryLabel, entryText, entryTime, episodeNotes, liveEntries,
+  dayBounds, dayKey, dayLabel, formatDayTime, formatDuration, formatTime, groupBy, type DayBounds,
+} from '../../lib/util';
+import {
+  allEpisodes, allTrackers, dayTotals, daysWithEntries, entryLabel, entryText, entryTime, episodeNotes, liveEntries,
   type Data, type Entry, type Episode,
 } from '../../lib/model';
 import { colorStyle } from '../../components/color';
-import { layOutDay, type BarPiece, type DayBounds, type Line } from './dayLog';
+import { layOutDay, type BarPiece, type Line } from './dayLog';
 import { EntryEditor, EpisodeEditor } from './EntryEditors';
 
 interface Props {
@@ -32,7 +34,7 @@ export function DaySection({ shownDay, onShowDay }: Props) {
     setOpenCheckin(null);
   };
 
-  const bounds = { from: dayStart(day), to: dayStart(nextDay(day)) };
+  const bounds = dayBounds(day);
   const entries = liveEntries(data).filter(e => entryTime(e) >= bounds.from && entryTime(e) < bounds.to);
   const episodes = allEpisodes(data).filter(e => e.end > bounds.from && e.start < bounds.to);
   const { lines, lanes } = layOutDay(data, entries, episodes, bounds, Date.now(), openCheckin);
@@ -72,21 +74,23 @@ export function DaySection({ shownDay, onShowDay }: Props) {
   );
 }
 
-/** What the day adds up to: "Headache 2× · 3 h 05 min", "Coffee 3×", "2 check-ins". */
+/**
+ * What the day adds up to (see dayTotals()): "Headache 2× · 3 h 05 min", "Coffee 3×", "2 check-ins". An episode
+ * carried over from the day before adds its time here, but was counted on the day it started: "Tired · 1 h 30 min".
+ */
 function DayTotals({ bounds, entries, episodes }: { bounds: DayBounds; entries: Entry[]; episodes: Episode[] }) {
   const trackers = allTrackers(useData());
+  const { trackers: byTracker, checkins } = dayTotals(bounds, entries, episodes);
   const totals: { key: string; color: string; text: string }[] = [];
   for (const tracker of trackers.filter(t => t.type === 'episode')) {
-    const theirs = episodes.filter(e => e.trackerId === tracker.id);
-    // Clipped to this day, for episodes that cross midnight.
-    const ms = theirs.reduce((sum, e) => sum + Math.min(e.end, bounds.to) - Math.max(e.start, bounds.from), 0);
-    if (theirs.length) totals.push({ key: tracker.id, color: tracker.color, text: `${tracker.name} ${theirs.length}× · ${formatDuration(ms)}` });
+    const total = byTracker.get(tracker.id);
+    const count = total?.count ? ` ${total.count}×` : '';
+    if (total) totals.push({ key: tracker.id, color: tracker.color, text: `${tracker.name}${count} · ${formatDuration(total.ms)}` });
   }
   for (const tracker of trackers.filter(t => t.type === 'moment')) {
-    const count = entries.filter(e => e.tracker_id === tracker.id && e.kind === 'moment').length;
+    const count = byTracker.get(tracker.id)?.count;
     if (count) totals.push({ key: tracker.id, color: tracker.color, text: `${tracker.name} ${count}×` });
   }
-  const checkins = new Set(entries.filter(e => e.kind === 'answer').map(checkinKey)).size;
   if (checkins) totals.push({ key: 'checkins', color: 'slate', text: `${checkins} ${checkins === 1 ? 'check-in' : 'check-ins'}` });
 
   if (!totals.length) return null;

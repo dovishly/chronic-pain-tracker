@@ -22,7 +22,7 @@ create table if not exists public.trackers (
 
 -- Every reading, tap or note. One long table: easy to export and analyze.
 create table if not exists public.entries (
-  id          uuid primary key,              -- made on the phone, so offline saves never duplicate
+  id          uuid primary key,              -- made on the device, so offline saves never duplicate
   user_id     uuid not null default auth.uid() references auth.users(id) on delete cascade,
   tracker_id  uuid not null references public.trackers(id) on delete cascade,
   occurred_at timestamptz not null,          -- when it happened
@@ -84,7 +84,7 @@ create trigger entries_touch before insert or update on public.entries
   for each row execute function public.touch_updated_at();
 
 -- ---------- A deletion is final, and keeps nothing ----------
--- A deleted row stays, marked deleted, so the deletion reaches every phone. It stays deleted even when a phone
+-- A deleted row stays, marked deleted, so the deletion reaches every device. It stays deleted even when a device
 -- that hadn't heard of it yet uploads its own copy (a tracker reordered offline, say), and whatever it held is
 -- wiped. The app wipes the same fields: deletedTracker() and deletedEntry() in src/lib/model.ts.
 

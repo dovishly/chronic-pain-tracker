@@ -511,7 +511,7 @@ def test_rating_needs_two_to_ten_levels(phone1):
 # ---------- phone 1: export ----------
 
 def test_export_is_one_zip_of_five_csvs_in_a_dated_folder(phone1_export):
-    assert re.match(r'logbook-\d{4}-\d{2}-\d{2}\.zip$', phone1_export.filename)
+    assert re.match(r'log-lightly-\d{4}-\d{2}-\d{2}\.zip$', phone1_export.filename)
     folder = phone1_export.filename.removesuffix('.zip')
     tables = ['daily', 'checkins', 'episodes', 'entries', 'trackers']
     assert sorted(phone1_export.files) == sorted(f'{folder}/{table}.csv' for table in tables)
@@ -843,7 +843,13 @@ def test_day_timeline_shows_gaps_and_overnight_episodes(browser, supabase):
     assert [rows.nth(i).inner_text().replace('\n', ' ') for i in range(4)] == [
         '11:30 AM Coffee', '3 h 30 min', '8:00 AM Coffee', 'Tired · since Mon, Nov 10 10:00 PM · until 7:00 AM · 9 h 00 min']
     expect(phone.locator('#day-log')).to_have_attribute('data-lanes', '1')
-    expect(phone.locator('.day-totals')).to_contain_text('Tired 1× · 7 h 00 min')  # the part on this day
+    # An episode is counted on the day it started; each day adds up the part of its time that fell on it.
+    expect(phone.locator('.day-total', has_text='Tired')).to_have_text('Tired · 7 h 00 min')
+    phone.page.click('#previous-day')
+    expect(phone.locator('.day-name')).to_contain_text('Mon, Nov 10')
+    expect(phone.locator('.day-total', has_text='Tired')).to_have_text('Tired 1× · 2 h 00 min')
+    phone.page.click('#next-day')
+    expect(phone.locator('.day-name')).to_contain_text('Tue, Nov 11')
 
     # The episode's row edits its start and end together, and deletes both.
     phone.locator('.entry-row.is-episode').click()

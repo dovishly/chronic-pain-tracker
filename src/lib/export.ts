@@ -35,7 +35,7 @@ const today = () => dayKey(Date.now());
 
 /** The analysis CSVs in one .zip, in a folder named after today's date. */
 export function exportForAnalysis(): Promise<void> {
-  const folder = `logbook-${today()}`;
+  const folder = `log-lightly-${today()}`;
   const encoder = new TextEncoder();
   const files = buildAnalysisTables(dataStore.get())
     .map((table): [string, Uint8Array] => [`${folder}/${table.name}.csv`, encoder.encode(toCsv(table))]);
@@ -46,14 +46,14 @@ export function exportForAnalysis(): Promise<void> {
 export function exportBackup(): Promise<void> {
   const data = dataStore.get();
   const backup = {
-    app: 'logbook',
+    app: 'logbook', // Log Lightly's former name, kept so every backup names the same format
     version: 1,
     exported: nowIso(),
     trackers: allTrackers(data),
     entries: liveEntries(data),
   };
   return shareOrDownload({
-    name: `logbook-backup-${today()}.json`,
+    name: `log-lightly-backup-${today()}.json`,
     data: JSON.stringify(backup, null, 1),
     type: 'application/json',
   });
