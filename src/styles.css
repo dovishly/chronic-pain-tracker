@@ -526,6 +526,18 @@ textarea {
   resize: vertical;
 }
 
+/* "+ Add" beside a section's heading: quiet text, out of the way of the tiles, but a full-size target. */
+.add-link {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: .95rem;
+  min-height: 44px;
+  padding: 0 4px;
+  margin-right: -4px;
+}
+
 /* ===================== Today: start/stop tiles ===================== */
 
 /* Dense, so the half-width tiles fill in around the full-row ones with levels, rather than leave holes. Nothing

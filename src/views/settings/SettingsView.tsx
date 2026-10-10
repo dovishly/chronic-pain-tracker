@@ -3,7 +3,8 @@ import { useData, useSyncState, useTheme } from '../../hooks';
 import { setTheme, type ThemeChoice } from '../../lib/theme';
 import { CheckIcon } from '../../components/icons';
 import { dayKey, dayLabel, uuid } from '../../lib/util';
-import { defaultConfig, entryTime, liveEntries, type Tracker } from '../../lib/model';
+import { activeTrackers, defaultConfig, entryTime, liveEntries, type Data, type Tracker, type TrackerType } from '../../lib/model';
+import { COLORS } from '../../components/color';
 import { exportBackup, exportForAnalysis } from '../../lib/export';
 import { resetDevice, resetEverywhere } from '../../lib/actions';
 import { safely } from '../../lib/toast';
@@ -11,13 +12,38 @@ import { TrackerEditor } from './TrackerEditor';
 import { ArchivedTrackers, TrackerList } from './TrackerList';
 import { SyncPanel } from './SyncPanel';
 
-const newTracker = (): Tracker => ({
-  id: uuid(), name: '', type: 'episode', group_name: '', color: 'indigo', config: defaultConfig('episode'), sort_order: 0, archived: false, deleted: false,
+/** A tracker to add, asked for from a section's "+ Add" on Today or Check in: its kind and heading. */
+export interface NewTrackerRequest {
+  type: TrackerType;
+  group: string;
+}
+
+/** A blank tracker, in the color the fewest trackers in use have, so they stay easy to tell apart. */
+const newTracker = (data: Data, { type, group }: NewTrackerRequest = { type: 'episode', group: '' }): Tracker => ({
+  id: uuid(), name: '', type, group_name: group, color: leastUsedColor(data),
+  config: defaultConfig(type), sort_order: 0, archived: false, deleted: false,
 });
 
-export function SettingsView() {
+function leastUsedColor(data: Data): string {
+  const uses = (color: string) => activeTrackers(data).filter(t => t.color === color).length;
+  return COLORS.reduce((best, color) => (uses(color) < uses(best) ? color : best));
+}
+
+interface Props {
+  /** Opens with a new tracker's editor, from "+ Add" on another tab; onAddDone takes the person back there. */
+  addRequest: NewTrackerRequest | null;
+  onAddDone: () => void;
+}
+
+export function SettingsView({ addRequest, onAddDone }: Props) {
   const data = useData();
-  const [editing, setEditing] = useState<{ tracker: Tracker; isNew: boolean } | null>(null);
+  const [editing, setEditing] = useState<{ tracker: Tracker; isNew: boolean; fromAdd?: boolean } | null>(
+    () => (addRequest ? { tracker: newTracker(data, addRequest), isNew: true, fromAdd: true } : null),
+  );
+  const closeEditor = () => {
+    setEditing(null);
+    if (editing?.fromAdd) onAddDone();
+  };
 
   const editTracker = (id: string) => {
     setEditing({ tracker: data.trackers.get(id)!, isNew: false });
@@ -29,7 +55,7 @@ export function SettingsView() {
       <section>
         <div className="row-between section-header">
           <h2>Trackers</h2>
-          <button className="button" id="add-tracker" type="button" onClick={() => setEditing({ tracker: newTracker(), isNew: true })}>
+          <button className="button" id="add-tracker" type="button" onClick={() => setEditing({ tracker: newTracker(data), isNew: true })}>
             Add tracker
           </button>
         </div>
@@ -38,7 +64,7 @@ export function SettingsView() {
             key={editing.tracker.id}
             tracker={editing.tracker}
             isNew={editing.isNew}
-            onClose={() => setEditing(null)}
+            onClose={closeEditor}
           />
         )}
         <div className="panel">

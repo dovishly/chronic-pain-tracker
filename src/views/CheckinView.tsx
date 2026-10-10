@@ -4,6 +4,8 @@ import { toDateTimeInputValue, unhandled } from '../lib/util';
 import { CHECKIN_TYPES, activeTrackers, groupTrackers, type Tracker } from '../lib/model';
 import { saveCheckin, type Answer } from '../lib/actions';
 import { colorStyle } from '../components/color';
+import { AddLink } from '../components/AddLink';
+import type { NewTrackerRequest } from './settings/SettingsView';
 
 export interface CheckinDraft {
   answers: Record<string, Answer>; // trackerId -> answer
@@ -16,9 +18,10 @@ interface Props {
   draft: CheckinDraft;
   onChange: Dispatch<SetStateAction<CheckinDraft>>;
   onSaved: (time: number) => void;
+  onAddTracker: (request: NewTrackerRequest) => void;
 }
 
-export function CheckinView({ draft, onChange, onSaved }: Props) {
+export function CheckinView({ draft, onChange, onSaved, onAddTracker }: Props) {
   const data = useData();
   const groups = groupTrackers(activeTrackers(data, ...CHECKIN_TYPES));
 
@@ -55,7 +58,10 @@ export function CheckinView({ draft, onChange, onSaved }: Props) {
         {groups.length ? (
           groups.map(([group, trackers]) => (
             <section key={group}>
-              <h2>{group}</h2>
+              <div className="row-between section-header">
+                <h2>{group}</h2>
+                <AddLink label={`Add a question to ${group}`} onClick={() => onAddTracker({ type: 'rating', group })} />
+              </div>
               <div className="panel">
                 {trackers.map(tracker => (
                   <Question
@@ -69,7 +75,13 @@ export function CheckinView({ draft, onChange, onSaved }: Props) {
             </section>
           ))
         ) : (
-          <p className="empty-note">No check-in questions yet. Add a Rating, Number, Choices or Note tracker in Settings.</p>
+          <section>
+            <div className="row-between section-header">
+              <h2>Check-in</h2>
+              <AddLink label="Add a question" onClick={() => onAddTracker({ type: 'rating', group: 'Check-in' })} />
+            </div>
+            <p className="empty-note">No questions yet. Add a rating, a number, choices or a note.</p>
+          </section>
         )}
       </div>
       <button className="button primary full-width" id="save-checkin" type="button" onClick={save}>Save check-in</button>

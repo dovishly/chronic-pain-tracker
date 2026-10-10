@@ -6,6 +6,8 @@ import {
 import { logLevel, logMoment, startAtLevel, toggleEpisode } from '../../lib/actions';
 import { colorStyle } from '../../components/color';
 import { CheckIcon } from '../../components/icons';
+import { AddLink } from '../../components/AddLink';
+import type { NewTrackerRequest } from '../settings/SettingsView';
 import { DaySection } from './DaySection';
 
 const CLOCK_REFRESH_MS = 30_000; // keeps running durations current
@@ -13,9 +15,10 @@ const CLOCK_REFRESH_MS = 30_000; // keeps running durations current
 interface Props {
   shownDay: string;
   onShowDay: (day: string) => void;
+  onAddTracker: (request: NewTrackerRequest) => void;
 }
 
-export function TodayView({ shownDay, onShowDay }: Props) {
+export function TodayView({ shownDay, onShowDay, onAddTracker }: Props) {
   const data = useData();
   const now = useNow(CLOCK_REFRESH_MS);
   const running = runningEpisodes(data);
@@ -29,7 +32,11 @@ export function TodayView({ shownDay, onShowDay }: Props) {
         {episodeGroups.length ? (
           episodeGroups.map(([group, trackers]) => (
             <section key={group}>
-              <h2>{group}</h2>
+              <div className="row-between section-header">
+                <h2>{group}</h2>
+                <AddLink label={`Add a start/stop tracker to ${group}`}
+                  onClick={() => onAddTracker({ type: 'episode', group })} />
+              </div>
               <div className="episode-grid">
                 {trackers.map(tracker => (
                   <EpisodeCard key={tracker.id} tracker={tracker} episode={running.get(tracker.id)} now={now} />
@@ -38,13 +45,22 @@ export function TodayView({ shownDay, onShowDay }: Props) {
             </section>
           ))
         ) : (
-          <p className="empty-note">No start/stop trackers yet. Add one in Settings.</p>
+          <section>
+            <div className="row-between section-header">
+              <h2>Symptoms</h2>
+              <AddLink label="Add a start/stop tracker" onClick={() => onAddTracker({ type: 'episode', group: 'Symptoms' })} />
+            </div>
+            <p className="empty-note">Nothing to start and stop yet. Add something that comes and goes, like pain.</p>
+          </section>
         )}
       </div>
 
-      {moments.length > 0 && (
-        <section aria-labelledby="moments-heading">
+      <section aria-labelledby="moments-heading">
+        <div className="row-between section-header">
           <h2 id="moments-heading">Moments</h2>
+          <AddLink label="Add a moment" onClick={() => onAddTracker({ type: 'moment', group: 'Moments' })} />
+        </div>
+        {moments.length > 0 ? (
           <div className="moment-buttons" id="moments">
             {moments.map(tracker => {
               const count = momentsToday.get(tracker.id) ?? 0;
@@ -64,8 +80,10 @@ export function TodayView({ shownDay, onShowDay }: Props) {
               );
             })}
           </div>
-        </section>
-      )}
+        ) : (
+          <p className="empty-note">Nothing to log with one tap yet, like a dose of medication.</p>
+        )}
+      </section>
 
       <DaySection shownDay={shownDay} onShowDay={onShowDay} />
     </section>

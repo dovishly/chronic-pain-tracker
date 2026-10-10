@@ -970,6 +970,29 @@ def test_appearance_is_picked_in_settings_and_kept(browser, supabase):
     assert background() == 'rgb(232, 236, 230)'
 
 
+def test_add_from_a_section_and_come_back(browser, supabase):
+    phone = Phone(browser, supabase)
+    add_moment = phone.locator('.add-link[aria-label="Add a moment"]')
+    add_moment.click()
+    expect(phone.locator('h1')).to_have_text('Settings')
+    expect(phone.locator('#editor-type')).to_have_value('moment')  # that section's kind and heading, filled in
+    expect(phone.locator('#editor-group')).to_have_value('Moments')
+    phone.page.click('#editor-cancel')
+    expect(phone.locator('h1')).to_have_text('Today')  # a mistap costs one tap
+
+    add_moment.click()
+    phone.page.fill('#editor-name', 'Snack')
+    phone.page.click('#editor-save')
+    expect(phone.locator('h1')).to_have_text('Today')
+    expect(phone.locator('#moments')).to_contain_text('Snack')
+
+    phone.go_to('Check in')
+    phone.locator('.add-link', has_text='Add').first.click()
+    expect(phone.locator('#editor-type')).to_have_value('rating')
+    phone.page.click('#editor-cancel')
+    expect(phone.locator('h1')).to_have_text('Check in')
+
+
 def test_editing_episodes_keeps_them_whole(browser, supabase):
     headache, pain = make_tracker('Headache', 'episode'), make_tracker('Pain', 'episode')
     phone = phone_with(browser, supabase, [headache, pain], [  # Nov 13, 2025, New York (UTC-5)
