@@ -513,6 +513,7 @@ input,
 select,
 textarea {
   font: inherit;
+  font-size: 16px;
   color: var(--ink);
   background: var(--field);
   border: 1.5px solid var(--line);
