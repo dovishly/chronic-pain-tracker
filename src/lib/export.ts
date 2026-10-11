@@ -1,7 +1,7 @@
 // The files Log Lightly gives you, shared or downloaded: "Export for analysis" (CSVs in a .zip, built in
 // analysis.ts) and "Export backup" (one JSON file, see backup.ts). Each is only ever started by a tap, so each comes
 // wrapped in safely(), like the actions: a failure shows a toast.
-import { dayKey } from './util';
+import { createStore, dayKey, prefs } from './util';
 import { dataStore } from './data';
 import { buildAnalysisTables, type Cell, type Table } from './analysis';
 import { backupOf } from './backup';
@@ -14,16 +14,16 @@ interface ExportFile {
   type: string;
 }
 
-/** Opens the share sheet where the browser can share files, otherwise downloads. */
-async function shareOrDownload(file: ExportFile): Promise<void> {
+/** Opens the share sheet where the browser can share files, otherwise downloads. False if the sheet was closed. */
+async function shareOrDownload(file: ExportFile): Promise<boolean> {
   const shareable = new File([file.data], file.name, { type: file.type });
   try {
     if (navigator.canShare?.({ files: [shareable] })) {
       await navigator.share({ files: [shareable], title: file.name });
-      return;
+      return true;
     }
   } catch (error) {
-    if ((error as Error)?.name === 'AbortError') return; // the person closed the share sheet
+    if ((error as Error)?.name === 'AbortError') return false; // the person closed the share sheet
   }
   const url = URL.createObjectURL(shareable);
   const link = document.createElement('a');
@@ -33,6 +33,7 @@ async function shareOrDownload(file: ExportFile): Promise<void> {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return true;
 }
 
 const today = () => dayKey(Date.now());
@@ -46,12 +47,20 @@ export const exportForAnalysis = safely(() => {
   return shareOrDownload({ name: `${folder}.zip`, data: zip(files), type: 'application/zip' });
 });
 
+/** When a backup was last exported from this device, in ms, or null if never. For the reminder on Today. */
+export const lastBackupStore = createStore(prefs.get<number>('lastBackup'));
+
 /** Every tracker and entry in one JSON file. */
-export const exportBackup = safely(() => shareOrDownload({
-  name: `log-lightly-backup-${today()}.json`,
-  data: JSON.stringify(backupOf(dataStore.get()), null, 1),
-  type: 'application/json',
-}));
+export const exportBackup = safely(async () => {
+  const shared = await shareOrDownload({
+    name: `log-lightly-backup-${today()}.json`,
+    data: JSON.stringify(backupOf(dataStore.get()), null, 1),
+    type: 'application/json',
+  });
+  if (!shared) return;
+  prefs.set('lastBackup', Date.now());
+  lastBackupStore.set(Date.now());
+});
 
 /* ---------- CSV ---------- */
 

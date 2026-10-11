@@ -89,3 +89,41 @@ def test_restoring_is_only_for_a_device_without_sync(browser, supabase):
     expect(phone.locator('#restore-backup-file')).to_have_count(1)
     phone.connect()
     expect(phone.locator('#restore-backup-file')).to_have_count(0)  # it gets its data from the account instead
+
+
+def test_a_reminder_to_back_up_when_entries_are_only_on_the_device(browser, supabase):
+    coffee = make_tracker('Coffee', 'moment')
+    recent = phone_with(browser, supabase, [coffee], [make_entry(coffee, 'moment', minutes_ago(60 * 24 * 13))])
+    expect(recent.locator('.moment-button', has_text='Coffee')).to_be_visible()
+    expect(recent.locator('#backup-reminder')).to_have_count(0)  # not two weeks yet
+
+    phone = phone_with(browser, supabase, [coffee], [make_entry(coffee, 'moment', minutes_ago(60 * 24 * 15))])
+    reminder = phone.locator('#backup-reminder')
+    expect(reminder).to_contain_text("You haven't backed up yet.")
+    with phone.page.expect_download():
+        phone.page.click('#backup-reminder-export')
+    expect(reminder).to_have_count(0)
+    phone.open()  # remembered
+    expect(phone.locator('.moment-button', has_text='Coffee')).to_be_visible()
+    expect(reminder).to_have_count(0)
+
+
+def test_the_backup_reminder_can_wait(browser, supabase):
+    coffee = make_tracker('Coffee', 'moment')
+    phone = phone_with(browser, supabase, [coffee], [make_entry(coffee, 'moment', minutes_ago(60 * 24 * 15))])
+    phone.page.click('#backup-reminder-not-now')
+    expect(phone.locator('#backup-reminder')).to_have_count(0)
+    phone.open()
+    expect(phone.locator('.moment-button', has_text='Coffee')).to_be_visible()
+    expect(phone.locator('#backup-reminder')).to_have_count(0)
+
+
+def test_no_backup_reminder_once_supabase_is_connected(browser, supabase):
+    coffee = make_tracker('Coffee', 'moment')
+    phone = phone_with(browser, supabase, [coffee], [make_entry(coffee, 'moment', minutes_ago(60 * 24 * 15))])
+    expect(phone.locator('#backup-reminder')).to_be_visible()
+    phone.go_to('Settings')
+    phone.connect()
+    phone.go_to('Today')
+    expect(phone.locator('.moment-button', has_text='Coffee')).to_be_visible()
+    expect(phone.locator('#backup-reminder')).to_have_count(0)

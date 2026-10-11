@@ -6,6 +6,7 @@ import { logLevel, logMoment, startAtLevel, toggleEpisode } from '../../lib/acti
 import { colorStyle } from '../../components/color';
 import { CheckIcon } from '../../components/icons';
 import { AddLink } from '../../components/AddLink';
+import { BackupReminder } from '../../components/BackupReminder';
 import type { NewTrackerRequest } from '../../navigation';
 import { DaySection } from './DaySection';
 import { ArrangeToday } from './ArrangeToday';
@@ -38,6 +39,7 @@ export function TodayView({ shownDay, onShowDay, onAddTracker, arranging, onArra
 
   return (
     <section id="view-today" className="stack spacious">
+      <BackupReminder />
       {groups.length ? (
         <>
           {groups.map(([group, rows], g) => (
