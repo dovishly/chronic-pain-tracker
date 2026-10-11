@@ -405,6 +405,11 @@ button:disabled {
   z-index: 6;
 }
 
+/* While arranging, above the arrange bar (44px buttons + 16px padding + a gap) rather than over its hint. */
+body:has(.arrange-bar) .toast {
+  bottom: calc(80px + 68px + env(safe-area-inset-bottom, 0px));
+}
+
 .toast-message {
   flex: 1 1 160px;
   font-weight: 700;

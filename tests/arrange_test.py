@@ -19,6 +19,12 @@ def today_layout(phone):
       })''')
 
 
+def moves_to(phone, layout):
+    """Waits for Today to show this layout, as saving the move takes a moment, then asserts it."""
+    phone.wait_for(lambda: today_layout(phone) == layout)
+    assert today_layout(phone) == layout
+
+
 def drag_onto(phone, name, target):
     """Drags the tile with this name, while arranging, to the middle of the target."""
     tile = phone.locator('[data-arrange]', has_text=name).bounding_box()
@@ -46,23 +52,19 @@ def test_arrange_today_with_the_arrows(browser, supabase):
     expect(medication).to_have_attribute('aria-pressed', 'true')
     later, earlier, new_row = (phone.locator(f'#arrange-{button}') for button in ('later', 'earlier', 'new-row'))
 
-    def moves_to(layout):
-        phone.wait_for(lambda: today_layout(phone) == layout)
-        assert today_layout(phone) == layout
-
     later.click()  # into the next heading, on a row of its own
-    moves_to([['Symptoms', [['Medication'], ['Pain'], ['Fatigue']]]])
+    moves_to(phone, [['Symptoms', [['Medication'], ['Pain'], ['Fatigue']]]])
     medication.press('ArrowRight')  # the arrow keys move a picked tile too; onto a tile, they trade places
-    moves_to([['Symptoms', [['Pain'], ['Medication'], ['Fatigue']]]])
+    moves_to(phone, [['Symptoms', [['Pain'], ['Medication'], ['Fatigue']]]])
     later.click()
-    moves_to([['Symptoms', [['Pain'], ['Fatigue'], ['Medication']]]])
+    moves_to(phone, [['Symptoms', [['Pain'], ['Fatigue'], ['Medication']]]])
     expect(later).to_be_disabled()  # last of all
     earlier.click()  # into the empty space beside Fatigue
-    moves_to([['Symptoms', [['Pain'], ['Fatigue', 'Medication']]]])
+    moves_to(phone, [['Symptoms', [['Pain'], ['Fatigue', 'Medication']]]])
     fatigue = phone.locator('[data-arrange]', has_text='Fatigue').bounding_box()
     assert medication.bounding_box()['y'] == fatigue['y']
     new_row.click()
-    moves_to([['Symptoms', [['Pain'], ['Fatigue'], ['Medication']]]])
+    moves_to(phone, [['Symptoms', [['Pain'], ['Fatigue'], ['Medication']]]])
     expect(new_row).to_be_disabled()  # on its own already
     phone.page.click('#arrange-done')
 
@@ -86,11 +88,11 @@ def test_arrange_today_by_dragging(browser, supabase):
     symptoms = phone.locator('#view-today > section', has=phone.locator('h2', has_text='Symptoms'))
 
     drag_onto(phone, 'Medication', symptoms.locator('.arrange-space'))  # the empty space beside Fatigue
-    assert today_layout(phone) == [['Symptoms', [['Pain'], ['Fatigue', 'Medication']]]]
+    moves_to(phone, [['Symptoms', [['Pain'], ['Fatigue', 'Medication']]]])
     drag_onto(phone, 'Medication', symptoms.locator('.arrange-gap').last)  # below the last row: a new one
-    assert today_layout(phone) == [['Symptoms', [['Pain'], ['Fatigue'], ['Medication']]]]
+    moves_to(phone, [['Symptoms', [['Pain'], ['Fatigue'], ['Medication']]]])
     drag_onto(phone, 'Fatigue', phone.locator('[data-arrange]', has_text='Pain'))  # onto a tile: they trade places
-    assert today_layout(phone) == [['Symptoms', [['Fatigue'], ['Pain'], ['Medication']]]]
+    moves_to(phone, [['Symptoms', [['Fatigue'], ['Pain'], ['Medication']]]])
 
     phone.page.click('#arrange-done')
     assert today_layout(phone) == [['Symptoms', [['Fatigue'], ['Pain'], ['Medication']]]]
