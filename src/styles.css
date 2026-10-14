@@ -528,6 +528,16 @@ textarea {
   width: 100%;
 }
 
+/* iOS gives a date or time box the width of its text, past the 100% above when the text is large. */
+input:is([type="date"], [type="time"], [type="datetime-local"]) {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input::-webkit-date-and-time-value {
+  text-align: left;
+}
+
 textarea {
   min-height: 84px;
   resize: vertical;
@@ -1421,7 +1431,7 @@ textarea {
   background: var(--surface);
   border-radius: 8px;
   min-width: 34px;
-  height: 34px;
+  min-height: 34px;
   padding: 0 8px;
   font-size: .85rem;
   font-weight: 700;
