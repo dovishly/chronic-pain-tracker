@@ -253,6 +253,13 @@ def make_entry(tracker, kind, occurred_at, note=None):
             'value': None, 'text': None, 'note': note, 'checkin_id': None, 'deleted': False}
 
 
+def midday_timezone():
+    """A time zone where it's about noon now, so entries from the last hour or two are all on today. Etc/GMT-N is
+    N hours ahead of UTC (the sign is reversed)."""
+    ahead = 12 - datetime.datetime.now(datetime.timezone.utc).hour
+    return f'Etc/GMT{-ahead:+d}' if ahead else 'Etc/GMT'
+
+
 def minutes_ago(minutes):
     """A UTC timestamp, as the app stores them."""
     when = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)

@@ -1,7 +1,7 @@
 """Today, each test on a new phone, most with known data: the day's log and its bars, and changing episodes."""
 import re
 from playwright.sync_api import expect
-from harness import Phone, make_entry, make_tracker, minutes_ago, phone_with
+from harness import Phone, make_entry, make_tracker, midday_timezone, minutes_ago, phone_with
 
 
 def test_day_timeline_shows_gaps_and_overnight_episodes(browser, supabase):
@@ -64,7 +64,7 @@ def test_ended_episode_stops_below_now(browser, supabase):
         make_entry(headache, 'start', minutes_ago(30)),
         make_entry(coffee, 'moment', minutes_ago(20)),
         make_entry(headache, 'end', minutes_ago(10)),
-    ], timezone=None)
+    ], timezone=midday_timezone())
     rows = phone.locator('#day-log > li')
     expect(rows.first).to_have_class('day-row day-now')
     expect(phone.locator('#day-log .lane-bar.is-now')).to_have_count(0)
@@ -132,7 +132,7 @@ def test_deleting_an_episode_takes_its_levels_along(browser, supabase):
         make_entry(coffee, 'moment', minutes_ago(30)),
         make_entry(headache, 'end', minutes_ago(20)),
         later,
-    ], timezone=None)
+    ], timezone=midday_timezone())
     log = phone.locator('#day-log')
     expect(log).to_contain_text('Headache: Moderate')
     phone.locator('.entry-row.is-episode').click()
